@@ -47,9 +47,7 @@
             cursor: pointer;
             user-select: none;
         }
-        .lecture-chip input {
-            display: none;
-        }
+        .lecture-chip input { display: none; }
         .lecture-chip.selected {
             background: #2e7dff;
             border-color: #2e7dff;
@@ -71,10 +69,7 @@
             font-weight: 500;
             cursor: pointer;
         }
-        button:disabled {
-            opacity: 0.5;
-            cursor: default;
-        }
+        button:disabled { opacity: 0.5; cursor: default; }
         #modeLabel {
             font-size: 0.85rem;
             color: #bbb;
@@ -115,15 +110,24 @@
             text-align: center;
             padding: 0.4rem 0.8rem 0.8rem;
         }
+        #audioControls {
+            margin-top: 0.7rem;
+            display: flex;
+            justify-content: center;
+            gap: 0.8rem;
+        }
+        #audioControls button {
+            background: #444;
+            font-size: 0.8rem;
+            padding: 0.35rem 0.7rem;
+        }
     </style>
 </head>
 <body>
-<header>
-    Hebrew Flashcards
-</header>
+<header>Hebrew Flashcards</header>
+
 <main>
     <div id="status">Loading words from Google Doc…</div>
-
     <div id="lectures"></div>
 
     <div id="controls">
@@ -135,21 +139,25 @@
         <div id="cardHint">Choose lectures and press Start.</div>
         <div id="question"></div>
         <div id="answer"></div>
+
+        <div id="audioControls">
+            <button id="speakHebBtn">Hebrew</button>
+            <button id="speakEngBtn">English</button>
+        </div>
     </div>
 </main>
-<div id="footer">
-    Tap card once to reveal, tap again for the next word.
-</div>
+
+<div id="footer">Tap card once to reveal, tap again for the next word.</div>
 
 <script>
     const DOC_ID = "1UVxgmP06_jXKVuc8vfRZqLFsXFrK22edaU-RQl2DHFs";
     const EXPORT_URL = "https://script.google.com/macros/s/AKfycbxPFQIzuoeky5mYfrokx_aQs-cidHFBmAoYCMB6J3mOb5TAcf-lKFqXUpvww4dNTz3h/exec";
-    
+
     let lectures = {};
     let allItems = {};
     let pool = [];
     let current = null;
-    let state = "idle"; // "idle", "question", "answer"
+    let state = "idle";
 
     const statusEl = document.getElementById("status");
     const lecturesEl = document.getElementById("lectures");
@@ -162,9 +170,7 @@
 
     async function fetchDocText() {
         const res = await fetch(EXPORT_URL);
-        if (!res.ok) {
-            throw new Error("HTTP " + res.status);
-        }
+        if (!res.ok) throw new Error("HTTP " + res.status);
         return await res.text();
     }
 
@@ -181,7 +187,6 @@
                 lectures[current].push(line);
             }
         });
-
         return lectures;
     }
 
@@ -193,9 +198,7 @@
                 const heb = parts[0].trim();
                 const eng = parts[1].trim();
                 const trans = parts.slice(2).join(" – ").trim();
-                if (heb && eng && trans) {
-                    items.push({ heb, eng, trans });
-                }
+                if (heb && eng && trans) items.push({ heb, eng, trans });
             }
         }
         return items;
@@ -225,9 +228,7 @@
             chip.appendChild(document.createTextNode(name));
 
             chip.addEventListener("click", e => {
-                if (e.target.tagName !== "INPUT") {
-                    input.checked = !input.checked;
-                }
+                if (e.target.tagName !== "INPUT") input.checked = !input.checked;
                 chip.classList.toggle("selected", input.checked);
                 e.preventDefault();
             });
@@ -242,17 +243,11 @@
     function collectSelectedItems() {
         const checkboxes = lecturesEl.querySelectorAll("input[type=checkbox]");
         const chosen = [];
-        checkboxes.forEach(cb => {
-            if (cb.checked) {
-                chosen.push(cb.value);
-            }
-        });
+        checkboxes.forEach(cb => { if (cb.checked) chosen.push(cb.value); });
 
         const result = [];
         chosen.forEach(name => {
-            if (allItems[name]) {
-                result.push(...allItems[name]);
-            }
+            if (allItems[name]) result.push(...allItems[name]);
         });
         return result;
     }
@@ -295,6 +290,7 @@
         } else {
             answerEl.textContent = `${current.heb}   (${current.trans})`;
         }
+
         cardHintEl.textContent = "Tap for next word.";
         state = "answer";
     }
@@ -309,11 +305,25 @@
     });
 
     cardEl.addEventListener("click", () => {
-        if (state === "question") {
-            showAnswer();
-        } else if (state === "answer") {
-            nextCard();
-        }
+        if (state === "question") showAnswer();
+        else if (state === "answer") nextCard();
+    });
+
+    function speak(text, lang) {
+        const utter = new SpeechSynthesisUtterance(text);
+        utter.lang = lang;
+        speechSynthesis.speak(utter);
+    }
+
+    function speakHeb(text) { speak(text, "he-IL"); }
+    function speakEng(text) { speak(text, "en-US"); }
+
+    document.getElementById("speakHebBtn").addEventListener("click", () => {
+        if (current) speakHeb(current.heb);
+    });
+
+    document.getElementById("speakEngBtn").addEventListener("click", () => {
+        if (current) speakEng(current.eng);
     });
 
     (async function init() {
@@ -330,8 +340,7 @@
             statusEl.textContent = "Error loading document: " + e.message;
         }
     })();
+
 </script>
 </body>
 </html>
-
-
