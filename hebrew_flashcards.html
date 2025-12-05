@@ -252,6 +252,22 @@
         return result;
     }
 
+    function speak(text, lang) {
+        const utter = new SpeechSynthesisUtterance(text);
+        utter.lang = lang;
+        speechSynthesis.cancel();
+        speechSynthesis.speak(utter);
+    }
+
+    function speakHeb(text) { speak(text, "he-IL"); }
+    function speakEng(text) { speak(text, "en-US"); }
+
+    function autoplayCurrent() {
+        if (!current) return;
+        if (current.mode === "heb_to_eng") speakHeb(current.heb);
+        else speakEng(current.eng);
+    }
+
     function nextCard() {
         if (!pool.length) {
             pool = collectSelectedItems();
@@ -280,6 +296,8 @@
             modeLabelEl.textContent = "Translate to Hebrew.";
             current.mode = mode;
         }
+
+        autoplayCurrent();
     }
 
     function showAnswer() {
@@ -309,15 +327,6 @@
         else if (state === "answer") nextCard();
     });
 
-    function speak(text, lang) {
-        const utter = new SpeechSynthesisUtterance(text);
-        utter.lang = lang;
-        speechSynthesis.speak(utter);
-    }
-
-    function speakHeb(text) { speak(text, "he-IL"); }
-    function speakEng(text) { speak(text, "en-US"); }
-
     document.getElementById("speakHebBtn").addEventListener("click", () => {
         if (current) speakHeb(current.heb);
     });
@@ -340,7 +349,7 @@
             statusEl.textContent = "Error loading document: " + e.message;
         }
     })();
-
 </script>
+
 </body>
 </html>
