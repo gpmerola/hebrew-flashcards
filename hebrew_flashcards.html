@@ -47,7 +47,9 @@
             cursor: pointer;
             user-select: none;
         }
-        .lecture-chip input { display: none; }
+        .lecture-chip input {
+            display: none;
+        }
         .lecture-chip.selected {
             background: #2e7dff;
             border-color: #2e7dff;
@@ -69,7 +71,10 @@
             font-weight: 500;
             cursor: pointer;
         }
-        button:disabled { opacity: 0.5; cursor: default; }
+        button:disabled {
+            opacity: 0.5;
+            cursor: default;
+        }
         #modeLabel {
             font-size: 0.85rem;
             color: #bbb;
@@ -199,10 +204,9 @@
         names.forEach(name => {
             const chip = document.createElement("label");
             const input = document.createElement("input");
-            chip.className = "lecture-chip";
             input.type = "checkbox";
             input.value = name;
-
+            chip.className = "lecture-chip";
             chip.appendChild(input);
             chip.appendChild(document.createTextNode(name));
 
@@ -215,8 +219,8 @@
             lecturesEl.appendChild(chip);
         });
 
-        startBtn.disabled = false;
         statusEl.textContent = "Lectures loaded. Select one or more and press Start.";
+        startBtn.disabled = false;
     }
 
     function collectSelectedItems() {
@@ -234,29 +238,25 @@
 
     function speak(text, lang) {
         if (!("speechSynthesis" in window)) return;
+        speechSynthesis.cancel();
         const utter = new SpeechSynthesisUtterance(text);
         utter.lang = lang;
-        speechSynthesis.cancel();
         speechSynthesis.speak(utter);
     }
 
     function speakHeb(t) { speak(t, "he-IL"); }
     function speakEng(t) { speak(t, "en-US"); }
 
-    function autoplayQuestion() {
+    function speakQuestion() {
         if (!current) return;
         if (current.mode === "heb_to_eng") speakHeb(current.heb);
         else speakEng(current.eng);
     }
 
-    function autoplayAnswer() {
+    function speakAnswer() {
         if (!current) return;
-
-        if (current.mode === "heb_to_eng") {
-            speakEng(current.eng);
-        } else {
-            speakHeb(current.heb);
-        }
+        if (current.mode === "heb_to_eng") speakEng(current.eng);
+        else speakHeb(current.heb);
     }
 
     function nextCard() {
@@ -287,7 +287,7 @@
             modeLabelEl.textContent = "Translate to Hebrew.";
         }
 
-        setTimeout(autoplayQuestion, 200);
+        setTimeout(speakQuestion, 200);
     }
 
     function showAnswer() {
@@ -302,7 +302,7 @@
         cardHintEl.textContent = "Tap for next word.";
         state = "answer";
 
-        setTimeout(autoplayAnswer, 200);
+        setTimeout(speakAnswer, 250);
     }
 
     startBtn.addEventListener("click", () => {
@@ -329,14 +329,13 @@
                 map[name] = extractItems(parsed[name]);
             });
 
-            lectures = parsed;
             allItems = map;
-
             buildLectureChips(parsed);
         } catch (err) {
             statusEl.textContent = "Error loading document: " + err.message;
         }
     })();
 </script>
+
 </body>
 </html>
