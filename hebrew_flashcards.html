@@ -47,7 +47,9 @@
             cursor: pointer;
             user-select: none;
         }
-        .lecture-chip input { display: none; }
+        .lecture-chip input {
+            display: none;
+        }
         .lecture-chip.selected {
             background: #2e7dff;
             border-color: #2e7dff;
@@ -69,7 +71,10 @@
             font-weight: 500;
             cursor: pointer;
         }
-        button:disabled { opacity: 0.5; cursor: default; }
+        button:disabled {
+            opacity: 0.5;
+            cursor: default;
+        }
         #modeLabel {
             font-size: 0.85rem;
             color: #bbb;
@@ -110,17 +115,6 @@
             text-align: center;
             padding: 0.4rem 0.8rem 0.8rem;
         }
-        #audioControls {
-            margin-top: 0.7rem;
-            display: flex;
-            justify-content: center;
-            gap: 0.8rem;
-        }
-        #audioControls button {
-            background: #444;
-            font-size: 0.8rem;
-            padding: 0.35rem 0.7rem;
-        }
     </style>
 </head>
 <body>
@@ -139,11 +133,6 @@
         <div id="cardHint">Choose lectures and press Start.</div>
         <div id="question"></div>
         <div id="answer"></div>
-
-        <div id="audioControls">
-            <button id="speakHebBtn">Hebrew</button>
-            <button id="speakEngBtn">English</button>
-        </div>
     </div>
 </main>
 
@@ -243,7 +232,9 @@
     function collectSelectedItems() {
         const checkboxes = lecturesEl.querySelectorAll("input[type=checkbox]");
         const chosen = [];
-        checkboxes.forEach(cb => { if (cb.checked) chosen.push(cb.value); });
+        checkboxes.forEach(cb => {
+            if (cb.checked) chosen.push(cb.value);
+        });
 
         const result = [];
         chosen.forEach(name => {
@@ -253,19 +244,30 @@
     }
 
     function speak(text, lang) {
+        if (!("speechSynthesis" in window)) {
+            return;
+        }
         const utter = new SpeechSynthesisUtterance(text);
         utter.lang = lang;
         speechSynthesis.cancel();
         speechSynthesis.speak(utter);
     }
 
-    function speakHeb(text) { speak(text, "he-IL"); }
-    function speakEng(text) { speak(text, "en-US"); }
+    function speakHeb(text) {
+        speak(text, "he-IL");
+    }
+
+    function speakEng(text) {
+        speak(text, "en-US");
+    }
 
     function autoplayCurrent() {
         if (!current) return;
-        if (current.mode === "heb_to_eng") speakHeb(current.heb);
-        else speakEng(current.eng);
+        if (current.mode === "heb_to_eng") {
+            speakHeb(current.heb);
+        } else {
+            speakEng(current.eng);
+        }
     }
 
     function nextCard() {
@@ -297,7 +299,7 @@
             current.mode = mode;
         }
 
-        autoplayCurrent();
+        setTimeout(autoplayCurrent, 150);
     }
 
     function showAnswer() {
@@ -323,16 +325,11 @@
     });
 
     cardEl.addEventListener("click", () => {
-        if (state === "question") showAnswer();
-        else if (state === "answer") nextCard();
-    });
-
-    document.getElementById("speakHebBtn").addEventListener("click", () => {
-        if (current) speakHeb(current.heb);
-    });
-
-    document.getElementById("speakEngBtn").addEventListener("click", () => {
-        if (current) speakEng(current.eng);
+        if (state === "question") {
+            showAnswer();
+        } else if (state === "answer") {
+            nextCard();
+        }
     });
 
     (async function init() {
@@ -350,6 +347,5 @@
         }
     })();
 </script>
-
 </body>
 </html>
