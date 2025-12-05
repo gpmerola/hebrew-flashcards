@@ -47,9 +47,7 @@
             cursor: pointer;
             user-select: none;
         }
-        .lecture-chip input {
-            display: none;
-        }
+        .lecture-chip input { display: none; }
         .lecture-chip.selected {
             background: #2e7dff;
             border-color: #2e7dff;
@@ -71,10 +69,7 @@
             font-weight: 500;
             cursor: pointer;
         }
-        button:disabled {
-            opacity: 0.5;
-            cursor: default;
-        }
+        button:disabled { opacity: 0.5; cursor: default; }
         #modeLabel {
             font-size: 0.85rem;
             color: #bbb;
@@ -139,7 +134,6 @@
 <div id="footer">Tap card once to reveal, tap again for the next word.</div>
 
 <script>
-    const DOC_ID = "1UVxgmP06_jXKVuc8vfRZqLFsXFrK22edaU-RQl2DHFs";
     const EXPORT_URL = "https://script.google.com/macros/s/AKfycbxPFQIzuoeky5mYfrokx_aQs-cidHFBmAoYCMB6J3mOb5TAcf-lKFqXUpvww4dNTz3h/exec";
 
     let lectures = {};
@@ -176,6 +170,7 @@
                 lectures[current].push(line);
             }
         });
+
         return lectures;
     }
 
@@ -193,23 +188,18 @@
         return items;
     }
 
-    function buildLectureChips(lecturesMap) {
+    function buildLectureChips(map) {
         lecturesEl.innerHTML = "";
-        const names = Object.keys(lecturesMap).sort((a, b) => {
+        const names = Object.keys(map).sort((a, b) => {
             const na = parseInt(a.replace(/\D+/g, ""), 10);
             const nb = parseInt(b.replace(/\D+/g, ""), 10);
             return na - nb;
         });
 
-        if (names.length === 0) {
-            statusEl.textContent = "No lectures found in the document.";
-            return;
-        }
-
         names.forEach(name => {
             const chip = document.createElement("label");
-            chip.className = "lecture-chip";
             const input = document.createElement("input");
+            chip.className = "lecture-chip";
             input.type = "checkbox";
             input.value = name;
 
@@ -225,48 +215,47 @@
             lecturesEl.appendChild(chip);
         });
 
-        statusEl.textContent = "Lectures loaded. Select one or more and press Start.";
         startBtn.disabled = false;
+        statusEl.textContent = "Lectures loaded. Select one or more and press Start.";
     }
 
     function collectSelectedItems() {
-        const checkboxes = lecturesEl.querySelectorAll("input[type=checkbox]");
         const chosen = [];
-        checkboxes.forEach(cb => {
+        lecturesEl.querySelectorAll("input[type=checkbox]").forEach(cb => {
             if (cb.checked) chosen.push(cb.value);
         });
 
-        const result = [];
+        const out = [];
         chosen.forEach(name => {
-            if (allItems[name]) result.push(...allItems[name]);
+            if (allItems[name]) out.push(...allItems[name]);
         });
-        return result;
+        return out;
     }
 
     function speak(text, lang) {
-        if (!("speechSynthesis" in window)) {
-            return;
-        }
+        if (!("speechSynthesis" in window)) return;
         const utter = new SpeechSynthesisUtterance(text);
         utter.lang = lang;
         speechSynthesis.cancel();
         speechSynthesis.speak(utter);
     }
 
-    function speakHeb(text) {
-        speak(text, "he-IL");
-    }
+    function speakHeb(t) { speak(t, "he-IL"); }
+    function speakEng(t) { speak(t, "en-US"); }
 
-    function speakEng(text) {
-        speak(text, "en-US");
-    }
-
-    function autoplayCurrent() {
+    function autoplayQuestion() {
         if (!current) return;
+        if (current.mode === "heb_to_eng") speakHeb(current.heb);
+        else speakEng(current.eng);
+    }
+
+    function autoplayAnswer() {
+        if (!current) return;
+
         if (current.mode === "heb_to_eng") {
-            speakHeb(current.heb);
-        } else {
             speakEng(current.eng);
+        } else {
+            speakHeb(current.heb);
         }
     }
 
@@ -284,6 +273,7 @@
 
         current = pool[Math.floor(Math.random() * pool.length)];
         const mode = Math.random() < 0.5 ? "heb_to_eng" : "eng_to_heb";
+        current.mode = mode;
 
         answerEl.textContent = "";
         cardHintEl.textContent = "Tap to reveal answer.";
@@ -292,14 +282,12 @@
         if (mode === "heb_to_eng") {
             questionEl.textContent = `${current.heb}   (${current.trans})`;
             modeLabelEl.textContent = "Translate to English.";
-            current.mode = mode;
         } else {
             questionEl.textContent = current.eng;
             modeLabelEl.textContent = "Translate to Hebrew.";
-            current.mode = mode;
         }
 
-        setTimeout(autoplayCurrent, 150);
+        setTimeout(autoplayQuestion, 200);
     }
 
     function showAnswer() {
@@ -313,6 +301,8 @@
 
         cardHintEl.textContent = "Tap for next word.";
         state = "answer";
+
+        setTimeout(autoplayAnswer, 200);
     }
 
     startBtn.addEventListener("click", () => {
@@ -325,25 +315,26 @@
     });
 
     cardEl.addEventListener("click", () => {
-        if (state === "question") {
-            showAnswer();
-        } else if (state === "answer") {
-            nextCard();
-        }
+        if (state === "question") showAnswer();
+        else nextCard();
     });
 
     (async function init() {
         try {
             const text = await fetchDocText();
-            lectures = parseLectures(text);
-            const itemsMap = {};
-            Object.keys(lectures).forEach(name => {
-                itemsMap[name] = extractItems(lectures[name]);
+            const parsed = parseLectures(text);
+
+            const map = {};
+            Object.keys(parsed).forEach(name => {
+                map[name] = extractItems(parsed[name]);
             });
-            allItems = itemsMap;
-            buildLectureChips(lectures);
-        } catch (e) {
-            statusEl.textContent = "Error loading document: " + e.message;
+
+            lectures = parsed;
+            allItems = map;
+
+            buildLectureChips(parsed);
+        } catch (err) {
+            statusEl.textContent = "Error loading document: " + err.message;
         }
     })();
 </script>
