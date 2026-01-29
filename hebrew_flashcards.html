@@ -146,6 +146,10 @@
 
 <script>
 
+    function dbg(label, value) {
+    console.log(`[DEBUG] ${label}:`, value);
+    }
+
 
     function normalizeGoogleDocUrl(url) {
     if (url.includes("/pub")) {
@@ -179,11 +183,16 @@
     const modeLabelEl = document.getElementById("modeLabel");
 
     async function fetchDocText() {
+        dbg("EXPORT_URL", EXPORT_URL);
+    
         const res = await fetch(EXPORT_URL);
-        if (!res.ok) {
-            throw new Error("HTTP " + res.status);
-        }
-        return await res.text();
+        dbg("fetch status", res.status);
+    
+        const text = await res.text();
+        dbg("raw text length", text.length);
+        dbg("raw text preview", text.slice(0, 500));
+    
+        return text;
     }
 
 function parseLectures(text) {
@@ -191,7 +200,10 @@ function parseLectures(text) {
     let currentKey = null;
     let awaitingTitle = false;
 
-    text.split(/\r?\n/).forEach(raw => {
+    const lines = text.split(/\r?\n/);
+    dbg("total lines", lines.length);
+
+    lines.forEach((raw, index) => {
         const line = raw
             .replace(/^\uFEFF/, "")
             .replace(/[\u00A0\u200B\u200C\u200D]/g, " ")
@@ -200,22 +212,33 @@ function parseLectures(text) {
 
         if (!line) return;
 
-            if (/^Lezione\b/.test(line)) {
-                currentKey = line;
-                lectures[currentKey] = {
-                    name: line,
-                    title: "",
-                    lines: []
-                };
-                awaitingTitle = true;
-                return;
-            }
+        if (line.toLowerCase().includes("lezione")) {
+            dbg(`line ${index} contains 'Lezione'`, line);
+        }
+
+        if (/^Lezione\b/i.test(line)) {
+            dbg(`LECTURE DETECTED at line ${index}`, line);
+
+            currentKey = line;
+            lectures[currentKey] = {
+                name: line,
+                title: "",
+                lines: []
+            };
+            awaitingTitle = true;
+            return;
+        }
 
         if (currentKey && awaitingTitle) {
-            const isVocabLine = line.split(/\s*-\s*/).length >= 3;
+            const normalized = line.replace(/[–—]/g, "-");
+            const isVocabLine = normalized.split(/\s*-\s*/).length >= 3;
+
+            dbg("checking possible title", { line, isVocabLine });
+
             if (!isVocabLine) {
                 lectures[currentKey].title = line;
                 awaitingTitle = false;
+                dbg("title set for", currentKey);
                 return;
             }
             awaitingTitle = false;
@@ -226,31 +249,38 @@ function parseLectures(text) {
         }
     });
 
+    dbg("parsed lectures object", lectures);
+    dbg("lecture count", Object.keys(lectures).length);
+
     return lectures;
 }
 
-    function extractItems(lines) {
-        const items = [];
-    
-        for (const rawLine of lines) {
-            const normalized = rawLine.replace(/[–—]/g, "-");
-            const parts = normalized.split(/\s*-\s*/);
-    
-            if (parts.length >= 3) {
-                const heb = parts[0].trim();
-                const eng = parts[1].trim();
-                const trans = parts.slice(2).join(" - ").trim();
-    
-                if (heb && eng && trans) {
-                    items.push({ heb, eng, trans });
-                }
+function extractItems(lines) {
+    const items = [];
+
+    dbg("extractItems called with", lines.length);
+
+    for (const rawLine of lines) {
+        const normalized = rawLine.replace(/[–—]/g, "-");
+        const parts = normalized.split(/\s*-\s*/);
+
+        if (parts.length >= 3) {
+            const heb = parts[0].trim();
+            const eng = parts[1].trim();
+            const trans = parts.slice(2).join(" - ").trim();
+
+            if (heb && eng && trans) {
+                items.push({ heb, eng, trans });
             }
         }
-    
-        return items;
     }
 
+    dbg("items extracted", items.length);
+    return items;
+}
+
 function buildLectureChips(lecturesMap) {
+    dbg("buildLectureChips called with", Object.keys(lecturesMap));
     lecturesEl.innerHTML = "";
 
     const names = Object.keys(lecturesMap).sort((a, b) => {
@@ -260,6 +290,7 @@ function buildLectureChips(lecturesMap) {
     });
 
     names.forEach(name => {
+        dbg("rendering lecture chip", data);
         const data = lecturesMap[name];
 
         const chip = document.createElement("label");
@@ -370,23 +401,33 @@ function buildLectureChips(lecturesMap) {
         }
     });
 
-    (async function init() {
-        try {
-            const text = await fetchDocText();
-            lectures = parseLectures(text);
-            const itemsMap = {};
-            Object.keys(lectures).forEach(name => {
-                itemsMap[name] = extractItems(lectures[name].lines);
-            });
-            allItems = itemsMap;
-            buildLectureChips(lectures);
-        } catch (e) {
-            statusEl.textContent = "Error loading document: " + e.message;
-        }
-    })();
+(async function init() {
+    try {
+        dbg("init started", true);
+
+        const text = await fetchDocText();
+        lectures = parseLectures(text);
+
+        dbg("lectures after parse", lectures);
+
+        const itemsMap = {};
+        Object.keys(lectures).forEach(name => {
+            itemsMap[name] = extractItems(lectures[name].lines);
+        });
+
+        allItems = itemsMap;
+        dbg("allItems", allItems);
+
+        buildLectureChips(lectures);
+    } catch (e) {
+        console.error(e);
+        statusEl.textContent = "Error loading document: " + e.message;
+    }
+})();
 </script>
 </body>
 </html>
+
 
 
 
