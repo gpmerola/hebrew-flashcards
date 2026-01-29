@@ -118,11 +118,12 @@
     </style>
 </head>
 <body>
-
-<header>Hebrew Flashcards</header>
-
+<header>
+    Hebrew Flashcards
+</header>
 <main>
-    <div id="status">Loading words…</div>
+    <div id="status">Loading words from Google Doc…</div>
+
     <div id="lectures"></div>
 
     <div id="controls">
@@ -136,20 +137,19 @@
         <div id="answer"></div>
     </div>
 </main>
-
-<div id="footer">Tap card once to reveal, tap again for the next word.</div>
+<div id="footer">
+    Tap card once to reveal, tap again for the next word.
+</div>
 
 <script>
-    const EXPORT_URL_DEFAULT = "https://script.google.com/macros/s/AKfycbxPFQIzuoeky5mYfrokx_aQs-cidHFBmAoYCMB6J3mOb5TAcf-lKFqXUpvww4dNTz3h/exec";
-    const EXPORT_URL_TEMATICO = "INSERISCI_QUI_L_URL_DEL_FILE_TEMATICO";
-
-    let EXPORT_URL = EXPORT_URL_DEFAULT;
+    const DOC_ID = "1UVxgmP06_jXKVuc8vfRZqLFsXFrK22edaU-RQl2DHFs";
+    const EXPORT_URL = "https://docs.google.com/document/d/e/2PACX-1vS9iILd7_1PfEdN8Gd-A1c7qOy7aZu_4Otg7gXDlxZnP0ZoXgRilCqsrud_gHBEkAydwSZG7H7wcUEC/export?format=txt";
 
     let lectures = {};
     let allItems = {};
     let pool = [];
     let current = null;
-    let state = "idle";
+    let state = "idle"; // "idle", "question", "answer"
 
     const statusEl = document.getElementById("status");
     const lecturesEl = document.getElementById("lectures");
@@ -160,16 +160,11 @@
     const answerEl = document.getElementById("answer");
     const modeLabelEl = document.getElementById("modeLabel");
 
-    function chooseSource() {
-        const useAlt = confirm(
-            'Vuoi usare il file "Lezioni daniel Hebrew - tematico"?\n\nOK = tematico\nAnnulla = solito file'
-        );
-        EXPORT_URL = useAlt ? EXPORT_URL_TEMATICO : EXPORT_URL_DEFAULT;
-    }
-
     async function fetchDocText() {
         const res = await fetch(EXPORT_URL);
-        if (!res.ok) throw new Error("HTTP " + res.status);
+        if (!res.ok) {
+            throw new Error("HTTP " + res.status);
+        }
         return await res.text();
     }
 
@@ -198,31 +193,41 @@
                 const heb = parts[0].trim();
                 const eng = parts[1].trim();
                 const trans = parts.slice(2).join(" – ").trim();
-                if (heb && eng && trans) items.push({ heb, eng, trans });
+                if (heb && eng && trans) {
+                    items.push({ heb, eng, trans });
+                }
             }
         }
         return items;
     }
 
-    function buildLectureChips(map) {
+    function buildLectureChips(lecturesMap) {
         lecturesEl.innerHTML = "";
-        const names = Object.keys(map).sort((a, b) => {
+        const names = Object.keys(lecturesMap).sort((a, b) => {
             const na = parseInt(a.replace(/\D+/g, ""), 10);
             const nb = parseInt(b.replace(/\D+/g, ""), 10);
             return na - nb;
         });
 
+        if (names.length === 0) {
+            statusEl.textContent = "No lectures found in the document.";
+            return;
+        }
+
         names.forEach(name => {
             const chip = document.createElement("label");
+            chip.className = "lecture-chip";
             const input = document.createElement("input");
             input.type = "checkbox";
             input.value = name;
-            chip.className = "lecture-chip";
+
             chip.appendChild(input);
             chip.appendChild(document.createTextNode(name));
 
             chip.addEventListener("click", e => {
-                if (e.target.tagName !== "INPUT") input.checked = !input.checked;
+                if (e.target.tagName !== "INPUT") {
+                    input.checked = !input.checked;
+                }
                 chip.classList.toggle("selected", input.checked);
                 e.preventDefault();
             });
@@ -235,39 +240,21 @@
     }
 
     function collectSelectedItems() {
+        const checkboxes = lecturesEl.querySelectorAll("input[type=checkbox]");
         const chosen = [];
-        lecturesEl.querySelectorAll("input[type=checkbox]").forEach(cb => {
-            if (cb.checked) chosen.push(cb.value);
+        checkboxes.forEach(cb => {
+            if (cb.checked) {
+                chosen.push(cb.value);
+            }
         });
 
-        const out = [];
+        const result = [];
         chosen.forEach(name => {
-            if (allItems[name]) out.push(...allItems[name]);
+            if (allItems[name]) {
+                result.push(...allItems[name]);
+            }
         });
-        return out;
-    }
-
-    function speak(text, lang) {
-        if (!("speechSynthesis" in window)) return;
-        speechSynthesis.cancel();
-        const utter = new SpeechSynthesisUtterance(text);
-        utter.lang = lang;
-        speechSynthesis.speak(utter);
-    }
-
-    function speakHeb(t) { speak(t, "he-IL"); }
-    function speakEng(t) { speak(t, "en-US"); }
-
-    function speakQuestion() {
-        if (!current) return;
-        if (current.mode === "heb_to_eng") speakHeb(current.heb);
-        else speakEng(current.eng);
-    }
-
-    function speakAnswer() {
-        if (!current) return;
-        if (current.mode === "heb_to_eng") speakEng(current.eng);
-        else speakHeb(current.heb);
+        return result;
     }
 
     function nextCard() {
@@ -284,7 +271,6 @@
 
         current = pool[Math.floor(Math.random() * pool.length)];
         const mode = Math.random() < 0.5 ? "heb_to_eng" : "eng_to_heb";
-        current.mode = mode;
 
         answerEl.textContent = "";
         cardHintEl.textContent = "Tap to reveal answer.";
@@ -293,12 +279,12 @@
         if (mode === "heb_to_eng") {
             questionEl.textContent = `${current.heb}   (${current.trans})`;
             modeLabelEl.textContent = "Translate to English.";
+            current.mode = mode;
         } else {
             questionEl.textContent = current.eng;
             modeLabelEl.textContent = "Translate to Hebrew.";
+            current.mode = mode;
         }
-
-        setTimeout(speakQuestion, 200);
     }
 
     function showAnswer() {
@@ -309,11 +295,8 @@
         } else {
             answerEl.textContent = `${current.heb}   (${current.trans})`;
         }
-
         cardHintEl.textContent = "Tap for next word.";
         state = "answer";
-
-        setTimeout(speakAnswer, 250);
     }
 
     startBtn.addEventListener("click", () => {
@@ -326,28 +309,27 @@
     });
 
     cardEl.addEventListener("click", () => {
-        if (state === "question") showAnswer();
-        else nextCard();
+        if (state === "question") {
+            showAnswer();
+        } else if (state === "answer") {
+            nextCard();
+        }
     });
 
     (async function init() {
         try {
-            chooseSource();
             const text = await fetchDocText();
-            const parsed = parseLectures(text);
-
-            const map = {};
-            Object.keys(parsed).forEach(name => {
-                map[name] = extractItems(parsed[name]);
+            lectures = parseLectures(text);
+            const itemsMap = {};
+            Object.keys(lectures).forEach(name => {
+                itemsMap[name] = extractItems(lectures[name]);
             });
-
-            allItems = map;
-            buildLectureChips(parsed);
-        } catch (err) {
-            statusEl.textContent = "Error loading document: " + err.message;
+            allItems = itemsMap;
+            buildLectureChips(lectures);
+        } catch (e) {
+            statusEl.textContent = "Error loading document: " + e.message;
         }
     })();
 </script>
-
 </body>
 </html>
