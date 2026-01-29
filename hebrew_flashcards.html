@@ -116,6 +116,97 @@
             text-align: center;
             cursor: pointer;
             user-select: none;
+            transition: transform 0.3s ease;
+            touch-action: pan-y;
+        }
+        #card.swipe-left {
+            transform: translateX(-100px) rotate(-5deg);
+            opacity: 0.5;
+        }
+        #card.swipe-right {
+            transform: translateX(100px) rotate(5deg);
+            opacity: 0.5;
+        }
+        #difficultyButtons {
+            display: none;
+            gap: 0.5rem;
+            margin-top: 1rem;
+            justify-content: center;
+        }
+        #difficultyButtons.show {
+            display: flex;
+        }
+        .diff-btn {
+            padding: 0.5rem 1rem;
+            border-radius: 999px;
+            border: none;
+            font-size: 0.85rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .diff-btn.easy {
+            background: #22c55e;
+            color: white;
+        }
+        .diff-btn.medium {
+            background: #eab308;
+            color: white;
+        }
+        .diff-btn.hard {
+            background: #ef4444;
+            color: white;
+        }
+        .diff-btn:hover {
+            transform: scale(1.05);
+            filter: brightness(1.1);
+        }
+        #statsPanel {
+            background: #181818;
+            border: 1px solid #333;
+            border-radius: 0.8rem;
+            padding: 0.8rem;
+            margin-top: 0.8rem;
+            display: none;
+            gap: 1rem;
+        }
+        #statsPanel.show {
+            display: flex;
+        }
+        .stat-item {
+            flex: 1;
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 1.3rem;
+            font-weight: 600;
+            color: #2e7dff;
+        }
+        .stat-label {
+            font-size: 0.75rem;
+            color: #888;
+            margin-top: 0.2rem;
+        }
+        #quickActions {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            margin-top: 0.5rem;
+        }
+        .quick-btn {
+            padding: 0.35rem 0.7rem;
+            border-radius: 999px;
+            border: 1px solid #444;
+            background: transparent;
+            color: #bbb;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .quick-btn:hover {
+            background: #2e7dff;
+            border-color: #2e7dff;
+            color: #fff;
         }
         #cardHint {
             font-size: 0.8rem;
@@ -164,7 +255,29 @@
         <button class="doc-btn" data-doc="chronological">Chronological</button>
     </div>
 
+    <div id="quickActions">
+        <button class="quick-btn" id="selectAllBtn">Select All</button>
+        <button class="quick-btn" id="clearAllBtn">Clear All</button>
+        <button class="quick-btn" id="studyUnlearnedBtn">Study Unlearned</button>
+        <button class="quick-btn" id="reviewDifficultBtn">Review Difficult</button>
+    </div>
+
     <div id="lectures"></div>
+
+    <div id="statsPanel">
+        <div class="stat-item">
+            <div class="stat-value" id="statStudied">0</div>
+            <div class="stat-label">Studied</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-value" id="statAccuracy">-</div>
+            <div class="stat-label">Accuracy</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-value" id="statStreak">0</div>
+            <div class="stat-label">Day Streak</div>
+        </div>
+    </div>
 
     <div id="controls">
         <button id="startBtn" disabled>Start</button>
@@ -176,9 +289,15 @@
         <div id="question"></div>
         <div id="answer"></div>
     </div>
+
+    <div id="difficultyButtons">
+        <button class="diff-btn easy" data-difficulty="easy">Easy (1)</button>
+        <button class="diff-btn medium" data-difficulty="medium">Medium (2)</button>
+        <button class="diff-btn hard" data-difficulty="hard">Hard (3)</button>
+    </div>
 </main>
 <div id="footer">
-    Tap card once to reveal, tap again for the next word.
+    Tap card to reveal/next • Keyboard: Space=reveal, Enter=next, 1/2/3=rate difficulty, R=replay audio
 </div>
 
 <script>
@@ -216,6 +335,26 @@
     let pool = [];
     let current = null;
     let state = "idle"; // "idle", "question", "answer"
+    
+    // Progress tracking
+    let progress = {
+        learned: {}, // {word_hash: {difficulty, lastSeen, timesReviewed, correct, incorrect}}
+        stats: {
+            todayStudied: 0,
+            totalStudied: 0,
+            lastStudyDate: null,
+            streak: 0,
+            sessionCorrect: 0,
+            sessionIncorrect: 0,
+            sessionTotal: 0
+        }
+    };
+    
+    // Touch/swipe handling
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let touchEndX = 0;
+    let touchEndY = 0;
 
     const statusEl = document.getElementById("status");
     const lecturesEl = document.getElementById("lectures");
@@ -225,6 +364,110 @@
     const questionEl = document.getElementById("question");
     const answerEl = document.getElementById("answer");
     const modeLabelEl = document.getElementById("modeLabel");
+    const difficultyButtonsEl = document.getElementById("difficultyButtons");
+    const statsPanelEl = document.getElementById("statsPanel");
+    
+    // Load progress from localStorage
+    function loadProgress() {
+        const saved = localStorage.getItem('hebrewFlashcardsProgress');
+        if (saved) {
+            try {
+                progress = JSON.parse(saved);
+                updateDailyStats();
+                updateStatsDisplay();
+            } catch (e) {
+                console.error('Error loading progress:', e);
+            }
+        }
+    }
+    
+    function saveProgress() {
+        localStorage.setItem('hebrewFlashcardsProgress', JSON.stringify(progress));
+    }
+    
+    function updateDailyStats() {
+        const today = new Date().toDateString();
+        if (progress.stats.lastStudyDate !== today) {
+            // New day
+            if (progress.stats.lastStudyDate) {
+                const lastDate = new Date(progress.stats.lastStudyDate);
+                const todayDate = new Date(today);
+                const diffDays = Math.floor((todayDate - lastDate) / (1000 * 60 * 60 * 24));
+                
+                if (diffDays === 1) {
+                    progress.stats.streak++;
+                } else if (diffDays > 1) {
+                    progress.stats.streak = 1;
+                }
+            } else {
+                progress.stats.streak = 1;
+            }
+            
+            progress.stats.todayStudied = 0;
+            progress.stats.lastStudyDate = today;
+            progress.stats.sessionCorrect = 0;
+            progress.stats.sessionIncorrect = 0;
+            progress.stats.sessionTotal = 0;
+        }
+    }
+    
+    function updateStatsDisplay() {
+        document.getElementById('statStudied').textContent = progress.stats.sessionTotal;
+        
+        const accuracy = progress.stats.sessionTotal > 0 
+            ? Math.round((progress.stats.sessionCorrect / progress.stats.sessionTotal) * 100)
+            : 0;
+        document.getElementById('statAccuracy').textContent = progress.stats.sessionTotal > 0 ? accuracy + '%' : '-';
+        
+        document.getElementById('statStreak').textContent = progress.stats.streak;
+    }
+    
+    function getWordHash(word) {
+        // Simple hash for tracking words
+        return word.heb + '::' + word.eng;
+    }
+    
+    function recordDifficulty(difficulty) {
+        if (!current) return;
+        
+        const hash = getWordHash(current);
+        const now = Date.now();
+        
+        if (!progress.learned[hash]) {
+            progress.learned[hash] = {
+                difficulty: difficulty,
+                lastSeen: now,
+                timesReviewed: 1,
+                correct: difficulty === 'easy' ? 1 : 0,
+                incorrect: difficulty === 'hard' ? 1 : 0
+            };
+        } else {
+            progress.learned[hash].difficulty = difficulty;
+            progress.learned[hash].lastSeen = now;
+            progress.learned[hash].timesReviewed++;
+            
+            if (difficulty === 'easy') {
+                progress.learned[hash].correct++;
+            } else if (difficulty === 'hard') {
+                progress.learned[hash].incorrect++;
+            }
+        }
+        
+        // Update session stats
+        progress.stats.sessionTotal++;
+        progress.stats.todayStudied++;
+        progress.stats.totalStudied++;
+        
+        if (difficulty === 'easy' || difficulty === 'medium') {
+            progress.stats.sessionCorrect++;
+        } else {
+            progress.stats.sessionIncorrect++;
+        }
+        
+        updateDailyStats();
+        saveProgress();
+        updateStatsDisplay();
+    }
 
     async function fetchDocText(url) {
         const EXPORT_URL = normalizeGoogleDocUrl(url);
@@ -443,11 +686,35 @@ function buildLectureChips(lecturesMap) {
             answerEl.textContent = "";
             cardHintEl.textContent = "Select at least one lecture and press Start.";
             state = "idle";
+            difficultyButtonsEl.classList.remove('show');
             return;
         }
 
+        // Hide difficulty buttons
+        difficultyButtonsEl.classList.remove('show');
+        
+        // Reset card animation
+        cardEl.classList.remove('swipe-left', 'swipe-right');
+
         // Always pick randomly from all available items
-        current = availableItems[Math.floor(Math.random() * availableItems.length)];
+        // Weighted by difficulty: hard words appear more often
+        let weightedItems = [];
+        availableItems.forEach(item => {
+            const hash = getWordHash(item);
+            const learned = progress.learned[hash];
+            
+            if (!learned) {
+                weightedItems.push(item); // New word
+            } else if (learned.difficulty === 'hard') {
+                weightedItems.push(item, item, item); // 3x frequency
+            } else if (learned.difficulty === 'medium') {
+                weightedItems.push(item, item); // 2x frequency
+            } else {
+                weightedItems.push(item); // 1x frequency
+            }
+        });
+        
+        current = weightedItems[Math.floor(Math.random() * weightedItems.length)];
         const mode = Math.random() < 0.5 ? "heb_to_eng" : "eng_to_heb";
 
         answerEl.textContent = "";
@@ -477,8 +744,11 @@ function buildLectureChips(lecturesMap) {
             // Auto-play the Hebrew pronunciation when showing answer
             setTimeout(() => speakHebrew(current.heb), 200);
         }
-        cardHintEl.textContent = "Tap for next word. 🔊 Tap Hebrew text to hear again.";
+        cardHintEl.textContent = "Rate difficulty or tap for next. 🔊 Tap Hebrew to hear again.";
         state = "answer";
+        
+        // Show difficulty buttons
+        difficultyButtonsEl.classList.add('show');
     }
 
     startBtn.addEventListener("click", () => {
@@ -487,6 +757,7 @@ function buildLectureChips(lecturesMap) {
             alert("Select at least one lecture.");
             return;
         }
+        statsPanelEl.classList.add('show');
         nextCard();
     });
 
@@ -497,10 +768,186 @@ function buildLectureChips(lecturesMap) {
             nextCard();
         }
     });
+    
+    // Difficulty button listeners
+    document.querySelectorAll('.diff-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const difficulty = btn.dataset.difficulty;
+            recordDifficulty(difficulty);
+            nextCard();
+        });
+    });
+    
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+        if (state === "idle") return;
+        
+        // Space = reveal answer
+        if (e.code === 'Space' && state === "question") {
+            e.preventDefault();
+            showAnswer();
+        }
+        // Enter = next card
+        else if (e.code === 'Enter' && state === "answer") {
+            e.preventDefault();
+            nextCard();
+        }
+        // 1 = Easy
+        else if ((e.code === 'Digit1' || e.code === 'Numpad1') && state === "answer") {
+            e.preventDefault();
+            recordDifficulty('easy');
+            nextCard();
+        }
+        // 2 = Medium
+        else if ((e.code === 'Digit2' || e.code === 'Numpad2') && state === "answer") {
+            e.preventDefault();
+            recordDifficulty('medium');
+            nextCard();
+        }
+        // 3 = Hard
+        else if ((e.code === 'Digit3' || e.code === 'Numpad3') && state === "answer") {
+            e.preventDefault();
+            recordDifficulty('hard');
+            nextCard();
+        }
+        // R = Replay audio
+        else if (e.code === 'KeyR' && current) {
+            e.preventDefault();
+            speakHebrew(current.heb);
+        }
+    });
+    
+    // Touch/Swipe gestures for mobile
+    cardEl.addEventListener('touchstart', (e) => {
+        touchStartX = e.changedTouches[0].screenX;
+        touchStartY = e.changedTouches[0].screenY;
+    }, { passive: true });
+    
+    cardEl.addEventListener('touchmove', (e) => {
+        touchEndX = e.changedTouches[0].screenX;
+        touchEndY = e.changedTouches[0].screenY;
+        
+        const deltaX = touchEndX - touchStartX;
+        const deltaY = touchEndY - touchStartY;
+        
+        // Visual feedback during swipe
+        if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 30) {
+            if (deltaX > 0) {
+                cardEl.style.transform = `translateX(${deltaX}px) rotate(${deltaX / 20}deg)`;
+            } else {
+                cardEl.style.transform = `translateX(${deltaX}px) rotate(${deltaX / 20}deg)`;
+            }
+        }
+    }, { passive: true });
+    
+    cardEl.addEventListener('touchend', (e) => {
+        const deltaX = touchEndX - touchStartX;
+        const deltaY = touchEndY - touchStartY;
+        
+        // Reset transform
+        cardEl.style.transform = '';
+        
+        // Horizontal swipe
+        if (Math.abs(deltaX) > Math.abs(deltaY)) {
+            // Swipe right (easy)
+            if (deltaX > 80 && state === "answer") {
+                cardEl.classList.add('swipe-right');
+                setTimeout(() => {
+                    cardEl.classList.remove('swipe-right');
+                    recordDifficulty('easy');
+                    nextCard();
+                }, 200);
+            }
+            // Swipe left (hard)
+            else if (deltaX < -80 && state === "answer") {
+                cardEl.classList.add('swipe-left');
+                setTimeout(() => {
+                    cardEl.classList.remove('swipe-left');
+                    recordDifficulty('hard');
+                    nextCard();
+                }, 200);
+            }
+        }
+    }, { passive: true });
+    
+    // Quick action buttons
+    document.getElementById('selectAllBtn').addEventListener('click', () => {
+        lecturesEl.querySelectorAll('input[type=checkbox]').forEach(cb => {
+            cb.checked = true;
+            cb.parentElement.classList.add('selected');
+        });
+    });
+    
+    document.getElementById('clearAllBtn').addEventListener('click', () => {
+        lecturesEl.querySelectorAll('input[type=checkbox]').forEach(cb => {
+            cb.checked = false;
+            cb.parentElement.classList.remove('selected');
+        });
+    });
+    
+    document.getElementById('studyUnlearnedBtn').addEventListener('click', () => {
+        const checkboxes = lecturesEl.querySelectorAll('input[type=checkbox]');
+        let hasUnlearned = false;
+        
+        checkboxes.forEach(cb => {
+            const lectureName = cb.value;
+            const items = allItems[lectureName] || [];
+            
+            // Check if this lecture has unlearned words
+            const hasNewWords = items.some(item => !progress.learned[getWordHash(item)]);
+            
+            if (hasNewWords) {
+                cb.checked = true;
+                cb.parentElement.classList.add('selected');
+                hasUnlearned = true;
+            } else {
+                cb.checked = false;
+                cb.parentElement.classList.remove('selected');
+            }
+        });
+        
+        if (!hasUnlearned) {
+            alert('Great job! All words have been studied at least once. 🎉');
+        }
+    });
+    
+    document.getElementById('reviewDifficultBtn').addEventListener('click', () => {
+        const checkboxes = lecturesEl.querySelectorAll('input[type=checkbox]');
+        let hasDifficult = false;
+        
+        checkboxes.forEach(cb => {
+            const lectureName = cb.value;
+            const items = allItems[lectureName] || [];
+            
+            // Check if this lecture has difficult words
+            const hasDifficultWords = items.some(item => {
+                const learned = progress.learned[getWordHash(item)];
+                return learned && (learned.difficulty === 'hard' || learned.difficulty === 'medium');
+            });
+            
+            if (hasDifficultWords) {
+                cb.checked = true;
+                cb.parentElement.classList.add('selected');
+                hasDifficult = true;
+            } else {
+                cb.checked = false;
+                cb.parentElement.classList.remove('selected');
+            }
+        });
+        
+        if (!hasDifficult) {
+            alert('No difficult words found! All words are marked as easy. 🌟');
+        }
+    });
 
 (async function init() {
     try {
         dbg("init started", true);
+        
+        // Load saved progress
+        loadProgress();
+        
         await loadDocument(currentDoc);
     } catch (e) {
         console.error(e);
