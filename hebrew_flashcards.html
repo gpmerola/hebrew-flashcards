@@ -183,14 +183,19 @@
     const modeLabelEl = document.getElementById("modeLabel");
 
     async function fetchDocText() {
-        dbg("EXPORT_URL", EXPORT_URL);
-    
         const res = await fetch(EXPORT_URL);
-        dbg("fetch status", res.status);
+        if (!res.ok) {
+            throw new Error("HTTP " + res.status);
+        }
     
-        const text = await res.text();
-        dbg("raw text length", text.length);
-        dbg("raw text preview", text.slice(0, 500));
+        const html = await res.text();
+    
+        // Convert HTML to visible text
+        const doc = new DOMParser().parseFromString(html, "text/html");
+        const text = doc.body.innerText || "";
+    
+        dbg("extracted text length", text.length);
+        dbg("extracted text preview", text.slice(0, 500));
     
         return text;
     }
@@ -427,6 +432,7 @@ function buildLectureChips(lecturesMap) {
 </script>
 </body>
 </html>
+
 
 
 
