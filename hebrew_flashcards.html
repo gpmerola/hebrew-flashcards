@@ -192,7 +192,11 @@ function parseLectures(text) {
     let awaitingTitle = false;
 
     text.split(/\r?\n/).forEach(raw => {
-        const line = raw.replace(/^\uFEFF/, "").replace(/\u00A0/g, " ").trim();
+        const line = raw
+            .replace(/^\uFEFF/, "")
+            .replace(/\u00A0/g, " ")
+            .trim();
+
         if (!line) return;
 
         if (/^Lezione\s+\d+/.test(line)) {
@@ -382,6 +386,7 @@ function buildLectureChips(lecturesMap) {
 </script>
 </body>
 </html>
+
 
 
 
