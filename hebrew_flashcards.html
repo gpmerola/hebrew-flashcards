@@ -116,8 +116,17 @@
             text-align: center;
             cursor: pointer;
             user-select: none;
-            transition: transform 0.3s ease;
+            transition: transform 0.2s ease;
             touch-action: pan-y;
+            transform-style: preserve-3d;
+        }
+        #card.flip {
+            animation: quickFlip 0.3s ease;
+        }
+        @keyframes quickFlip {
+            0% { transform: rotateY(0deg); }
+            50% { transform: rotateY(90deg); }
+            100% { transform: rotateY(0deg); }
         }
         #card.swipe-left {
             transform: translateX(-100px) rotate(-5deg);
@@ -126,6 +135,38 @@
         #card.swipe-right {
             transform: translateX(100px) rotate(5deg);
             opacity: 0.5;
+        }
+        #multipleChoiceOptions {
+            display: none;
+            flex-direction: column;
+            gap: 0.8rem;
+            margin-top: 1rem;
+        }
+        #multipleChoiceOptions.show {
+            display: flex;
+        }
+        .mc-option {
+            padding: 1rem;
+            border-radius: 0.8rem;
+            border: 2px solid #333;
+            background: #222;
+            color: #fff;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+        }
+        .mc-option:hover {
+            border-color: #2e7dff;
+            background: #2a2a2a;
+        }
+        .mc-option.correct {
+            border-color: #22c55e;
+            background: #1a4d2e;
+        }
+        .mc-option.incorrect {
+            border-color: #ef4444;
+            background: #4d1a1a;
         }
         #difficultyButtons {
             display: none;
@@ -264,7 +305,23 @@
         <button class="quick-btn" id="clearAllBtn">Clear All</button>
         <button class="quick-btn" id="studyUnlearnedBtn">Study Unlearned</button>
         <button class="quick-btn" id="reviewDifficultBtn">Review Difficult</button>
+        <button class="quick-btn" id="reviewSessionBtn">📝 Review Session</button>
+        <button class="quick-btn" id="suggestLectureBtn">💡 Suggest Next</button>
         <button class="quick-btn" id="syncBtn">☁️ Sync Now</button>
+    </div>
+
+    <div id="studyMode" style="margin-top: 0.8rem; display: flex; gap: 0.5rem; align-items: center;">
+        <span style="font-size: 0.85rem; color: #888;">Mode:</span>
+        <select id="modeSelector" style="padding: 0.4rem 0.8rem; border-radius: 999px; border: 1px solid #444; background: #222; color: #fff; font-size: 0.85rem; cursor: pointer;">
+            <option value="flashcard">Flashcard</option>
+            <option value="multiple-choice">Multiple Choice</option>
+            <option value="typing">Type Answer</option>
+        </select>
+    </div>
+
+    <div id="topDifficult" style="margin-top: 0.8rem; padding: 0.8rem; background: #181818; border: 1px solid #333; border-radius: 0.8rem; display: none;">
+        <div style="font-size: 0.9rem; font-weight: 600; margin-bottom: 0.5rem; color: #ef4444;">🔥 Top 10 Most Difficult Words</div>
+        <div id="difficultWordsList" style="font-size: 0.85rem; color: #bbb;"></div>
     </div>
 
     <div id="lectures"></div>
@@ -293,6 +350,7 @@
         <div id="cardHint">Choose lectures and press Start.</div>
         <div id="question"></div>
         <div id="answer"></div>
+        <div id="multipleChoiceOptions"></div>
     </div>
 
     <div id="difficultyButtons">
@@ -445,12 +503,14 @@
     
     let currentView = 'thematic'; // 'thematic' or 'chronological'
     let isSyncing = false;
+    let studyMode = 'flashcard'; // 'flashcard', 'multiple-choice', 'typing'
 
     let lectures = {};
     let allItems = {};
     let pool = [];
     let current = null;
     let state = "idle"; // "idle", "question", "answer"
+    let multipleChoiceCorrectAnswer = null;
     
     // Progress tracking
     let progress = {
@@ -600,6 +660,98 @@
         document.getElementById('statAccuracy').textContent = progress.stats.sessionTotal > 0 ? accuracy + '%' : '-';
         
         document.getElementById('statStreak').textContent = progress.stats.streak;
+        
+        // Update top difficult words
+        updateTopDifficultWords();
+    }
+    
+    function updateTopDifficultWords() {
+        const difficultWords = [];
+        
+        for (const [hash, data] of Object.entries(progress.learned)) {
+            if (data.difficulty === 'hard' || (data.incorrect > data.correct)) {
+                const [heb, eng] = hash.split('::');
+                const errorRate = data.timesReviewed > 0 ? data.incorrect / data.timesReviewed : 0;
+                difficultWords.push({ heb, eng, errorRate, incorrect: data.incorrect, reviewed: data.timesReviewed });
+            }
+        }
+        
+        // Sort by error rate, then by number of incorrect
+        difficultWords.sort((a, b) => b.errorRate - a.errorRate || b.incorrect - a.incorrect);
+        
+        const top10 = difficultWords.slice(0, 10);
+        
+        if (top10.length > 0) {
+            document.getElementById('topDifficult').style.display = 'block';
+            const html = top10.map((w, i) => 
+                `<div style="padding: 0.3rem 0; border-bottom: 1px solid #2a2a2a;">
+                    ${i + 1}. <strong>${w.heb}</strong> - ${w.eng} 
+                    <span style="color: #ef4444;">(${w.incorrect}/${w.reviewed} wrong)</span>
+                </div>`
+            ).join('');
+            document.getElementById('difficultWordsList').innerHTML = html;
+        } else {
+            document.getElementById('topDifficult').style.display = 'none';
+        }
+    }
+    
+    function suggestNextLecture() {
+        const suggestions = [];
+        
+        for (const [name, items] of Object.entries(allItems)) {
+            const totalWords = items.length;
+            let learnedCount = 0;
+            let avgDifficulty = 0;
+            let difficultySum = 0;
+            let difficultyCount = 0;
+            
+            items.forEach(item => {
+                const hash = getWordHash(item);
+                if (progress.learned[hash]) {
+                    learnedCount++;
+                    if (progress.learned[hash].difficulty === 'easy') {
+                        difficultySum += 1;
+                    } else if (progress.learned[hash].difficulty === 'medium') {
+                        difficultySum += 2;
+                    } else if (progress.learned[hash].difficulty === 'hard') {
+                        difficultySum += 3;
+                    }
+                    difficultyCount++;
+                }
+            });
+            
+            const completionRate = learnedCount / totalWords;
+            avgDifficulty = difficultyCount > 0 ? difficultySum / difficultyCount : 0;
+            
+            // Score: prioritize partially completed, not too difficult lectures
+            const score = completionRate * 0.5 + (1 - avgDifficulty / 3) * 0.3 + (learnedCount > 0 ? 0.2 : 0);
+            
+            suggestions.push({
+                name,
+                completionRate,
+                avgDifficulty,
+                score,
+                learned: learnedCount,
+                total: totalWords
+            });
+        }
+        
+        suggestions.sort((a, b) => b.score - a.score);
+        
+        const best = suggestions[0];
+        if (best) {
+            const msg = `Suggested: "${best.name}"\n\n` +
+                       `Progress: ${best.learned}/${best.total} words (${Math.round(best.completionRate * 100)}%)\n` +
+                       `Would you like to select it?`;
+            
+            if (confirm(msg)) {
+                // Select this lecture
+                lecturesEl.querySelectorAll('input[type=checkbox]').forEach(cb => {
+                    cb.checked = cb.value === best.name;
+                    cb.parentElement.classList.toggle('selected', cb.checked);
+                });
+            }
+        }
     }
     
     function getWordHash(word) {
@@ -735,51 +887,205 @@ function buildLectureChips(lecturesMap) {
             cardHintEl.textContent = "Select at least one lecture and press Start.";
             state = "idle";
             difficultyButtonsEl.classList.remove('show');
+            document.getElementById('multipleChoiceOptions').classList.remove('show');
             return;
         }
 
-        // Hide difficulty buttons
+        // Hide UI elements
         difficultyButtonsEl.classList.remove('show');
+        document.getElementById('multipleChoiceOptions').classList.remove('show');
+        answerEl.textContent = "";
         
-        // Reset card animation
-        cardEl.classList.remove('swipe-left', 'swipe-right');
+        // Reset and trigger flip animation
+        cardEl.classList.remove('swipe-left', 'swipe-right', 'flip');
+        setTimeout(() => cardEl.classList.add('flip'), 10);
 
-        // Always pick randomly from all available items
-        // Weighted by difficulty: hard words appear more often
+        // Weighted random selection
         let weightedItems = [];
         availableItems.forEach(item => {
             const hash = getWordHash(item);
             const learned = progress.learned[hash];
             
             if (!learned) {
-                weightedItems.push(item); // New word
+                weightedItems.push(item);
             } else if (learned.difficulty === 'hard') {
-                weightedItems.push(item, item, item); // 3x frequency
+                weightedItems.push(item, item, item);
             } else if (learned.difficulty === 'medium') {
-                weightedItems.push(item, item); // 2x frequency
+                weightedItems.push(item, item);
             } else {
-                weightedItems.push(item); // 1x frequency
+                weightedItems.push(item);
             }
         });
         
         current = weightedItems[Math.floor(Math.random() * weightedItems.length)];
         const mode = Math.random() < 0.5 ? "heb_to_eng" : "eng_to_heb";
-
-        answerEl.textContent = "";
-        cardHintEl.textContent = "Tap to reveal answer. 🔊 Tap Hebrew text to hear pronunciation.";
+        current.mode = mode;
+        
         state = "question";
 
-        if (mode === "heb_to_eng") {
+        // Handle different study modes
+        if (studyMode === 'multiple-choice') {
+            showMultipleChoice();
+        } else if (studyMode === 'typing') {
+            showTypingMode();
+        } else {
+            // Standard flashcard mode
+            showFlashcardQuestion();
+        }
+    }
+    
+    function showFlashcardQuestion() {
+        answerEl.textContent = "";
+        cardHintEl.textContent = "Tap to reveal answer. 🔊 Tap Hebrew text to hear pronunciation.";
+
+        if (current.mode === "heb_to_eng") {
             questionEl.innerHTML = `<span class="hebrew-audio" onclick="speakHebrew('${current.heb.replace(/'/g, "\\'")}'); event.stopPropagation();">${current.heb}</span>   (${current.trans})`;
             modeLabelEl.textContent = "Translate to English.";
-            current.mode = mode;
-            // Auto-play on question show
             setTimeout(() => speakHebrew(current.heb), 300);
         } else {
             questionEl.textContent = current.eng;
             modeLabelEl.textContent = "Translate to Hebrew.";
-            current.mode = mode;
         }
+    }
+    
+    function showMultipleChoice() {
+        const mcOptions = document.getElementById('multipleChoiceOptions');
+        mcOptions.innerHTML = '';
+        mcOptions.classList.add('show');
+        
+        cardHintEl.textContent = "Select the correct answer";
+        
+        if (current.mode === "heb_to_eng") {
+            questionEl.innerHTML = `<span class="hebrew-audio" onclick="speakHebrew('${current.heb.replace(/'/g, "\\'")}'); event.stopPropagation();">${current.heb}</span>   (${current.trans})`;
+            modeLabelEl.textContent = "Select the English translation:";
+            setTimeout(() => speakHebrew(current.heb), 300);
+            
+            // Generate wrong answers
+            const allItems = collectSelectedItems();
+            const wrongAnswers = allItems
+                .filter(item => item.eng !== current.eng)
+                .sort(() => Math.random() - 0.5)
+                .slice(0, 3)
+                .map(item => item.eng);
+            
+            const options = [...wrongAnswers, current.eng].sort(() => Math.random() - 0.5);
+            multipleChoiceCorrectAnswer = current.eng;
+            
+            options.forEach(option => {
+                const btn = document.createElement('div');
+                btn.className = 'mc-option';
+                btn.textContent = option;
+                btn.onclick = () => checkMultipleChoice(btn, option);
+                mcOptions.appendChild(btn);
+            });
+        } else {
+            questionEl.textContent = current.eng;
+            modeLabelEl.textContent = "Select the Hebrew translation:";
+            
+            const allItems = collectSelectedItems();
+            const wrongAnswers = allItems
+                .filter(item => item.heb !== current.heb)
+                .sort(() => Math.random() - 0.5)
+                .slice(0, 3)
+                .map(item => `${item.heb} (${item.trans})`);
+            
+            const options = [...wrongAnswers, `${current.heb} (${current.trans})`].sort(() => Math.random() - 0.5);
+            multipleChoiceCorrectAnswer = `${current.heb} (${current.trans})`;
+            
+            options.forEach(option => {
+                const btn = document.createElement('div');
+                btn.className = 'mc-option';
+                btn.textContent = option;
+                btn.onclick = () => checkMultipleChoice(btn, option);
+                mcOptions.appendChild(btn);
+            });
+        }
+    }
+    
+    function checkMultipleChoice(btn, answer) {
+        const isCorrect = answer === multipleChoiceCorrectAnswer;
+        
+        btn.classList.add(isCorrect ? 'correct' : 'incorrect');
+        
+        // Disable all options
+        document.querySelectorAll('.mc-option').forEach(opt => {
+            opt.style.pointerEvents = 'none';
+            if (opt.textContent === multipleChoiceCorrectAnswer) {
+                opt.classList.add('correct');
+            }
+        });
+        
+        // Record result
+        recordDifficulty(isCorrect ? 'easy' : 'hard');
+        
+        // Show answer
+        if (current.mode === "heb_to_eng") {
+            answerEl.textContent = `${current.eng} – ${current.trans}`;
+        } else {
+            answerEl.innerHTML = `<span class="hebrew-audio" onclick="speakHebrew('${current.heb.replace(/'/g, "\\'")}'); event.stopPropagation();">${current.heb}</span>   (${current.trans})`;
+            setTimeout(() => speakHebrew(current.heb), 200);
+        }
+        
+        state = "answer";
+        cardHintEl.textContent = "Tap card or press Enter for next word";
+        
+        // Auto-advance after 1.5 seconds
+        setTimeout(() => {
+            if (state === "answer") {
+                nextCard();
+            }
+        }, 1500);
+    }
+    
+    function showTypingMode() {
+        cardHintEl.textContent = "Type your answer and press Enter";
+        answerEl.innerHTML = '<input type="text" id="typingInput" style="width: 100%; padding: 0.8rem; font-size: 1rem; border-radius: 0.5rem; border: 2px solid #444; background: #222; color: #fff; text-align: center;" placeholder="Type answer here...">';
+        
+        if (current.mode === "heb_to_eng") {
+            questionEl.innerHTML = `<span class="hebrew-audio" onclick="speakHebrew('${current.heb.replace(/'/g, "\\'")}'); event.stopPropagation();">${current.heb}</span>   (${current.trans})`;
+            modeLabelEl.textContent = "Type the English translation:";
+            setTimeout(() => speakHebrew(current.heb), 300);
+        } else {
+            questionEl.textContent = current.eng;
+            modeLabelEl.textContent = "Type the Hebrew word:";
+        }
+        
+        const input = document.getElementById('typingInput');
+        input.focus();
+        
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                checkTypingAnswer(input.value.trim());
+            }
+        });
+    }
+    
+    function checkTypingAnswer(userAnswer) {
+        const correctAnswer = current.mode === "heb_to_eng" ? current.eng.toLowerCase() : current.heb;
+        const isCorrect = userAnswer.toLowerCase() === correctAnswer.toLowerCase();
+        
+        const input = document.getElementById('typingInput');
+        input.disabled = true;
+        input.style.borderColor = isCorrect ? '#22c55e' : '#ef4444';
+        input.style.background = isCorrect ? '#1a4d2e' : '#4d1a1a';
+        
+        recordDifficulty(isCorrect ? 'easy' : 'hard');
+        
+        if (current.mode === "heb_to_eng") {
+            answerEl.innerHTML = `<div style="margin-bottom: 0.5rem;">${input.outerHTML}</div><div>Correct: ${current.eng} – ${current.trans}</div>`;
+        } else {
+            answerEl.innerHTML = `<div style="margin-bottom: 0.5rem;">${input.outerHTML}</div><div><span class="hebrew-audio" onclick="speakHebrew('${current.heb.replace(/'/g, "\\'")}'); event.stopPropagation();">${current.heb}</span>   (${current.trans})</div>`;
+            setTimeout(() => speakHebrew(current.heb), 200);
+        }
+        
+        state = "answer";
+        cardHintEl.textContent = "Tap card or press Enter for next word";
+        
+        setTimeout(() => {
+            if (state === "answer") {
+                nextCard();
+            }
+        }, 1500);
     }
 
     function showAnswer() {
@@ -810,6 +1116,15 @@ function buildLectureChips(lecturesMap) {
     });
 
     cardEl.addEventListener("click", () => {
+        // Don't handle clicks in multiple choice or typing mode
+        if (studyMode === 'multiple-choice' || studyMode === 'typing') {
+            if (state === "answer") {
+                nextCard();
+            }
+            return;
+        }
+        
+        // Standard flashcard mode
         if (state === "question") {
             showAnswer();
         } else if (state === "answer") {
@@ -987,6 +1302,58 @@ function buildLectureChips(lecturesMap) {
         if (!hasDifficult) {
             alert('No difficult words found! All words are marked as easy. 🌟');
         }
+    });
+    
+    // Review Session button
+    document.getElementById('reviewSessionBtn').addEventListener('click', () => {
+        const reviewWords = [];
+        
+        // Get all words studied in last 3 days that were hard or medium
+        const threeDaysAgo = Date.now() - (3 * 24 * 60 * 60 * 1000);
+        
+        for (const [hash, data] of Object.entries(progress.learned)) {
+            if (data.lastSeen > threeDaysAgo && (data.difficulty === 'hard' || data.difficulty === 'medium')) {
+                reviewWords.push(hash);
+            }
+        }
+        
+        if (reviewWords.length === 0) {
+            alert('No words to review! Study some difficult words first.');
+            return;
+        }
+        
+        // Find and select lectures that contain these words
+        const lecturesToSelect = new Set();
+        
+        reviewWords.forEach(hash => {
+            const [heb, eng] = hash.split('::');
+            // Find which lecture this word belongs to
+            for (const [lectureName, items] of Object.entries(allItems)) {
+                if (items.some(item => item.heb === heb && item.eng === eng)) {
+                    lecturesToSelect.add(lectureName);
+                }
+            }
+        });
+        
+        // Select those lectures
+        lecturesEl.querySelectorAll('input[type=checkbox]').forEach(cb => {
+            const should = lecturesToSelect.has(cb.value);
+            cb.checked = should;
+            cb.parentElement.classList.toggle('selected', should);
+        });
+        
+        alert(`Review Session: ${lecturesToSelect.size} lectures selected with ${reviewWords.length} words to review!`);
+    });
+    
+    // Suggest Lecture button
+    document.getElementById('suggestLectureBtn').addEventListener('click', () => {
+        suggestNextLecture();
+    });
+    
+    // Mode selector
+    document.getElementById('modeSelector').addEventListener('change', (e) => {
+        studyMode = e.target.value;
+        dbg('Study mode changed to:', studyMode);
     });
     
     // Sync button
