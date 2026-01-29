@@ -212,7 +212,7 @@ function parseLectures(text) {
     function extractItems(lines) {
         const items = [];
         for (const line of lines) {
-            const parts = line.split(/\s*-\s*/);
+            const parts = line.split(/\s*[–—-]\s*/);
             if (parts.length >= 3) {
                 const heb = parts[0].trim();
                 const eng = parts[1].trim();
@@ -362,4 +362,5 @@ function buildLectureChips(lecturesMap) {
 </script>
 </body>
 </html>
+
 
