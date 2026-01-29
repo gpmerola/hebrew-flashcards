@@ -342,6 +342,7 @@
             // Skip header row
             if (isHeader && (line.includes('Lezione') || line.includes('Hebrew') || line.includes('Ebraico'))) {
                 isHeader = false;
+                dbg("Skipping header row:", line);
                 return;
             }
             
@@ -370,57 +371,69 @@
             const trans = parts[3] || '';
             const chronologia = parts[4] || '';
             
-            // Check if this row defines a new thematic lecture
+            // Update current thematic lecture if new one is defined
             if (thematicLezione && /^Lezione\s+\d+/i.test(thematicLezione)) {
                 currentThematic = thematicLezione;
                 
-                if (viewMode === 'thematic') {
-                    if (!lectures[currentThematic]) {
-                        // Extract title after the dash if present
-                        const titleMatch = thematicLezione.match(/Lezione\s+\d+\s*[-–]\s*(.+)/i);
-                        const title = titleMatch ? titleMatch[1] : '';
-                        
-                        lectures[currentThematic] = {
-                            name: currentThematic.split(/[-–]/)[0].trim(),
-                            title: title,
-                            lines: []
-                        };
-                        
-                        dbg(`Thematic lecture detected: ${currentThematic}`);
-                    }
-                }
-            }
-            
-            // Check if chronologia column defines a chronological lecture
-            if (chronologia && /^Lezione\s+\d+/i.test(chronologia)) {
-                if (currentChronological !== chronologia) {
-                    currentChronological = chronologia;
+                if (viewMode === 'thematic' && !lectures[currentThematic]) {
+                    // Extract title after the dash if present
+                    const titleMatch = thematicLezione.match(/Lezione\s+\d+\s*[-–]\s*(.+)/i);
+                    const title = titleMatch ? titleMatch[1] : '';
                     
-                    if (viewMode === 'chronological') {
-                        if (!lectures[currentChronological]) {
-                            const titleMatch = chronologia.match(/Lezione\s+\d+\s*[-–]\s*(.+)/i);
-                            const title = titleMatch ? titleMatch[1] : '';
-                            
-                            lectures[currentChronological] = {
-                                name: currentChronological.split(/[-–]/)[0].trim(),
-                                title: title,
-                                lines: []
-                            };
-                            
-                            dbg(`Chronological lecture detected: ${currentChronological}`);
-                        }
-                    }
+                    lectures[currentThematic] = {
+                        name: currentThematic.split(/[-–]/)[0].trim(),
+                        title: title,
+                        lines: []
+                    };
+                    
+                    dbg(`Thematic lecture created: ${currentThematic}`);
                 }
             }
             
-            // Add vocabulary entry to the appropriate lecture
+            // Update current chronological lecture if new one is defined
+            if (chronologia && /^Lezione\s+\d+/i.test(chronologia)) {
+                currentChronological = chronologia;
+                
+                if (viewMode === 'chronological' && !lectures[currentChronological]) {
+                    const titleMatch = chronologia.match(/Lezione\s+\d+\s*[-–]\s*(.+)/i);
+                    const title = titleMatch ? titleMatch[1] : '';
+                    
+                    lectures[currentChronological] = {
+                        name: currentChronological.split(/[-–]/)[0].trim(),
+                        title: title,
+                        lines: []
+                    };
+                    
+                    dbg(`Chronological lecture created: ${currentChronological}`);
+                }
+            }
+            
+            // Add vocabulary entry to the appropriate lecture (if we have Hebrew word)
             if (heb && /[א-ת]/.test(heb) && eng && trans) {
                 const entry = `${heb} – ${eng} – ${trans}`;
                 
-                if (viewMode === 'thematic' && currentThematic && lectures[currentThematic]) {
+                if (viewMode === 'thematic' && currentThematic) {
+                    if (!lectures[currentThematic]) {
+                        // Create lecture on the fly if not exists
+                        lectures[currentThematic] = {
+                            name: currentThematic.split(/[-–]/)[0].trim(),
+                            title: '',
+                            lines: []
+                        };
+                    }
                     lectures[currentThematic].lines.push(entry);
-                } else if (viewMode === 'chronological' && currentChronological && lectures[currentChronological]) {
+                    dbg(`Added to thematic ${currentThematic}:`, heb);
+                } else if (viewMode === 'chronological' && currentChronological) {
+                    if (!lectures[currentChronological]) {
+                        // Create lecture on the fly if not exists
+                        lectures[currentChronological] = {
+                            name: currentChronological.split(/[-–]/)[0].trim(),
+                            title: '',
+                            lines: []
+                        };
+                    }
                     lectures[currentChronological].lines.push(entry);
+                    dbg(`Added to chronological ${currentChronological}:`, heb);
                 }
             }
         });
