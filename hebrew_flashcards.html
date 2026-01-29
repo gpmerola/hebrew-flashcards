@@ -507,14 +507,20 @@
                 lines.push(section);
             } else if (section.length > 0) {
                 // Split on Hebrew characters (each vocab entry starts with Hebrew)
-                // Look for pattern: Hebrew chars followed by dash
-                const entries = section.split(/(?=[א-ת]{2,}\s*[–—-])/);
+                // More aggressive: split when we see Hebrew followed by dash OR Hebrew followed by space and English
+                const entries = section.split(/(?=[א-ת]{2,}\s*(?:[–—-]|\s+[a-zA-Z]))/);
                 
                 entries.forEach(entry => {
                     const cleaned = entry.trim();
-                    // Must contain Hebrew and at least one dash
-                    if (cleaned && /[א-ת]/.test(cleaned) && /[–—-]/.test(cleaned)) {
-                        lines.push(cleaned);
+                    // Must contain Hebrew and either a dash or pattern "Hebrew English transliteration"
+                    if (cleaned && /[א-ת]/.test(cleaned)) {
+                        // Check if it has dashes OR looks like "Hebrew English transliteration"
+                        const hasDash = /[–—-]/.test(cleaned);
+                        const hasPattern = /[א-ת]+\s+[a-zA-Z]+\s+[a-z]/i.test(cleaned);
+                        
+                        if (hasDash || hasPattern) {
+                            lines.push(cleaned);
+                        }
                     }
                 });
             }
@@ -580,6 +586,7 @@ function extractItems(lines) {
     dbg("extractItems called with", lines.length);
 
     for (const rawLine of lines) {
+        // First try normal parsing with dashes
         const normalized = rawLine.replace(/[–—]/g, "-");
         const parts = normalized.split(/\s*-\s*/).map(p => p.trim()).filter(p => p.length > 0);
 
@@ -587,12 +594,26 @@ function extractItems(lines) {
         if (parts.length >= 2) {
             const heb = parts[0];
             const eng = parts[1];
-            const trans = parts.length >= 3 ? parts.slice(2).join(" - ") : parts[1]; // Use English as fallback if no transliteration
+            const trans = parts.length >= 3 ? parts.slice(2).join(" - ") : parts[1];
 
             // Must have Hebrew characters in first part and some English in second
             if (heb && eng && /[א-ת]/.test(heb)) {
                 items.push({ heb, eng, trans });
-                dbg("extracted item", { heb, eng, trans });
+                dbg("extracted item with dashes", { heb, eng, trans });
+            }
+        } else {
+            // Fallback: try to parse lines without dashes
+            // Pattern: Hebrew word(s) followed by English word(s) followed by transliteration
+            const match = rawLine.match(/^([א-ת\s]+)\s+([a-zA-Z\s/]+?)\s+([a-z][a-z\s']+)$/i);
+            if (match) {
+                const heb = match[1].trim();
+                const eng = match[2].trim();
+                const trans = match[3].trim();
+                
+                if (heb && eng && trans) {
+                    items.push({ heb, eng, trans });
+                    dbg("extracted item without dashes", { heb, eng, trans });
+                }
             }
         }
     }
