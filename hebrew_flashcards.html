@@ -225,20 +225,23 @@ function parseLectures(text) {
 }
 
     function extractItems(lines) {
-        const normalized = line.replace(/[–—]/g, "-");
-        const parts = normalized.split(/\s*-\s*/);
         const items = [];
-        for (const line of lines) {
-            const parts = line.split(/\s*[–—-]\s*/);
+    
+        for (const rawLine of lines) {
+            const normalized = rawLine.replace(/[–—]/g, "-");
+            const parts = normalized.split(/\s*-\s*/);
+    
             if (parts.length >= 3) {
                 const heb = parts[0].trim();
                 const eng = parts[1].trim();
-                const trans = parts.slice(2).join(" – ").trim();
+                const trans = parts.slice(2).join(" - ").trim();
+    
                 if (heb && eng && trans) {
                     items.push({ heb, eng, trans });
                 }
             }
         }
+    
         return items;
     }
 
@@ -379,6 +382,7 @@ function buildLectureChips(lecturesMap) {
 </script>
 </body>
 </html>
+
 
 
 
