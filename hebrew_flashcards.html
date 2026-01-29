@@ -33,6 +33,27 @@
             font-size: 0.9rem;
             color: #bbb;
         }
+        #docSelector {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+        .doc-btn {
+            padding: 0.4rem 0.8rem;
+            border-radius: 999px;
+            border: 1px solid #444;
+            background: transparent;
+            color: #bbb;
+            font-size: 0.85rem;
+            cursor: pointer;
+            font-weight: 400;
+        }
+        .doc-btn.active {
+            background: #2e7dff;
+            border-color: #2e7dff;
+            color: #fff;
+            font-weight: 500;
+        }
         #lectures {
             display: flex;
             flex-wrap: wrap;
@@ -127,6 +148,11 @@
 <main>
     <div id="status">Loading words from Google Doc…</div>
 
+    <div id="docSelector">
+        <button class="doc-btn active" data-doc="thematic">By Theme</button>
+        <button class="doc-btn" data-doc="chronological">Chronological</button>
+    </div>
+
     <div id="lectures"></div>
 
     <div id="controls">
@@ -161,11 +187,18 @@
     throw new Error("Unsupported Google Docs URL");
     }
     
-    const DOC_ID = "1UVxgmP06_jXKVuc8vfRZqLFsXFrK22edaU-RQl2DHFs";
-    const RAW_DOC_URL =
-      "https://docs.google.com/document/d/e/2PACX-1vS9iILd7_1PfEdN8Gd-A1c7qOy7aZu_4Otg7gXDlxZnP0ZoXgRilCqsrud_gHBEkAydwSZG7H7wcUEC/pub";
+    const DOCS = {
+        thematic: {
+            name: "By Theme",
+            url: "https://docs.google.com/document/d/e/2PACX-1vS9iILd7_1PfEdN8Gd-A1c7qOy7aZu_4Otg7gXDlxZnP0ZoXgRilCqsrud_gHBEkAydwSZG7H7wcUEC/pub"
+        },
+        chronological: {
+            name: "Chronological Order",
+            url: "https://docs.google.com/document/d/e/2PACX-1vT7b3MavM9VAIHpjQNG3Bj79BfCSnVbu4ucrQnjWyFAqVqYd-MOr8WsEfJ0x3x7OrsIAP4aA_UVLbeD/pub"
+        }
+    };
     
-    const EXPORT_URL = normalizeGoogleDocUrl(RAW_DOC_URL);
+    let currentDoc = 'thematic'; // default
 
     let lectures = {};
     let allItems = {};
@@ -182,7 +215,8 @@
     const answerEl = document.getElementById("answer");
     const modeLabelEl = document.getElementById("modeLabel");
 
-    async function fetchDocText() {
+    async function fetchDocText(url) {
+        const EXPORT_URL = normalizeGoogleDocUrl(url);
         const res = await fetch(EXPORT_URL);
         if (!res.ok) {
             throw new Error("HTTP " + res.status);
@@ -454,8 +488,19 @@ function buildLectureChips(lecturesMap) {
 (async function init() {
     try {
         dbg("init started", true);
+        await loadDocument(currentDoc);
+    } catch (e) {
+        console.error(e);
+        statusEl.textContent = "Error loading document: " + e.message;
+    }
+})();
 
-        const text = await fetchDocText();
+async function loadDocument(docKey) {
+    try {
+        statusEl.textContent = `Loading ${DOCS[docKey].name}...`;
+        startBtn.disabled = true;
+        
+        const text = await fetchDocText(DOCS[docKey].url);
         lectures = parseLectures(text);
 
         dbg("lectures after parse", lectures);
@@ -469,11 +514,35 @@ function buildLectureChips(lecturesMap) {
         dbg("allItems", allItems);
 
         buildLectureChips(lectures);
+        
+        // Reset card state
+        state = "idle";
+        pool = [];
+        questionEl.textContent = "";
+        answerEl.textContent = "";
+        cardHintEl.textContent = "Choose lectures and press Start.";
+        modeLabelEl.textContent = "";
     } catch (e) {
         console.error(e);
         statusEl.textContent = "Error loading document: " + e.message;
     }
-})();
+}
+
+// Document selector event listeners
+document.querySelectorAll('.doc-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+        const docKey = btn.dataset.doc;
+        if (docKey === currentDoc) return;
+        
+        // Update UI
+        document.querySelectorAll('.doc-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        
+        // Load new document
+        currentDoc = docKey;
+        await loadDocument(docKey);
+    });
+});
 </script>
 </body>
 </html>
