@@ -191,39 +191,62 @@
         const html = await res.text();
         const doc = new DOMParser().parseFromString(html, "text/html");
     
-        // Get all paragraphs and preserve structure
-        let lines = [];
-        const elements = doc.querySelectorAll('p, h1, h2, h3, h4, h5, h6, span, div');
+        // Extract raw text from body
+        let text = doc.body.textContent || "";
         
-        elements.forEach(el => {
-            const text = el.textContent.trim();
-            if (text && text.length > 0) {
-                // Skip style/script content
-                if (!text.includes('{') && !text.includes('margin:0')) {
-                    lines.push(text);
-                }
-            }
-        });
+        // Remove CSS and metadata
+        text = text.replace(/\{[^}]*\}/g, '');
+        text = text.replace(/^.*?Updated automatically every \d+ minutes/i, '');
+        text = text.replace(/^.*?Title\s*/i, '');
         
-        // If no elements found or too few, try splitting the body text
-        if (lines.length < 10) {
-            dbg("fallback parsing", true);
-            let text = doc.body.textContent || "";
+        // Normalize whitespace but preserve structure
+        text = text.replace(/\s+/g, ' ').trim();
+        
+        dbg("raw text length", text.length);
+        
+        // Split into lines by looking for pattern: Hebrew - English - transliteration
+        // Match: Hebrew word(s) followed by – or - followed by English followed by – or - followed by transliteration
+        const vocabPattern = /([א-ת\s]{2,})\s*[–—-]\s*([a-zA-Z\s/]+?)\s*[–—-]\s*([a-z\s']+?)(?=\s+[א-ת]{2,}\s*[–—-]|Lezione|\s*$)/gi;
+        
+        const lines = [];
+        let currentPos = 0;
+        
+        // First, extract all Lezione headers
+        const lezMatch = text.matchAll(/Lezione\s+\d+[^א-ת]*/gi);
+        
+        for (const match of text.matchAll(/Lezione\s+\d+[^א-ת]*/gi)) {
+            lines.push(match[0].trim());
+        }
+        
+        // Now split the text into sections by Lezione
+        const sections = text.split(/(Lezione\s+\d+[^א-ת]*)/gi);
+        
+        dbg("sections found", sections.length);
+        
+        for (let i = 0; i < sections.length; i++) {
+            const section = sections[i].trim();
             
-            // Remove CSS and metadata
-            text = text.replace(/\{[^}]*\}/g, '');
-            text = text.replace(/^.*?Updated automatically every \d+ minutes/i, '');
-            
-            // Split on Lezione markers more aggressively
-            const parts = text.split(/(Lezione\s+\d+[^א-ת]*[א-ת][^L]*?)(?=Lezione|\s*$)/gi);
-            
-            lines = [];
-            for (let part of parts) {
-                part = part.trim();
-                if (part && part.length > 5 && !part.includes('{')) {
-                    // Split individual words by looking for Hebrew-dash-English-dash-transliteration pattern
-                    const wordLines = part.split(/(?=[א-ת]{2,}\s*[–—-]\s*[a-zA-Z])/);
-                    lines.push(...wordLines.map(l => l.trim()).filter(l => l.length > 0));
+            // If this is a Lezione header
+            if (/^Lezione\s+\d+/i.test(section)) {
+                lines.push(section);
+            } else if (section.length > 0) {
+                // Extract vocabulary items from this section
+                const vocabMatches = [...section.matchAll(vocabPattern)];
+                
+                if (vocabMatches.length > 0) {
+                    vocabMatches.forEach(match => {
+                        const vocabLine = `${match[1].trim()} – ${match[2].trim()} – ${match[3].trim()}`;
+                        lines.push(vocabLine);
+                    });
+                } else {
+                    // Fallback: split on Hebrew characters
+                    const words = section.split(/(?=[א-ת]{2,})/);
+                    words.forEach(word => {
+                        const w = word.trim();
+                        if (w && w.includes('–') || w.includes('-')) {
+                            lines.push(w);
+                        }
+                    });
                 }
             }
         }
@@ -346,7 +369,7 @@ function buildLectureChips(lecturesMap) {
         lecturesEl.appendChild(chip);
     });
 
-    statusEl.textContent = "Hi! Lectures loaded. Select one or more and press Start.";
+    statusEl.textContent = "Lectures loaded. Select one or more and press Start.";
     startBtn.disabled = false;
 }
 
@@ -454,4 +477,3 @@ function buildLectureChips(lecturesMap) {
 </script>
 </body>
 </html>
-
