@@ -191,19 +191,48 @@
         const html = await res.text();
         const doc = new DOMParser().parseFromString(html, "text/html");
     
-        let text = doc.body.innerText || "";
+        // Get all paragraphs and preserve structure
+        let lines = [];
+        const elements = doc.querySelectorAll('p, h1, h2, h3, h4, h5, h6, span, div');
+        
+        elements.forEach(el => {
+            const text = el.textContent.trim();
+            if (text && text.length > 0) {
+                // Skip style/script content
+                if (!text.includes('{') && !text.includes('margin:0')) {
+                    lines.push(text);
+                }
+            }
+        });
+        
+        // If no elements found or too few, try splitting the body text
+        if (lines.length < 10) {
+            dbg("fallback parsing", true);
+            let text = doc.body.textContent || "";
+            
+            // Remove CSS and metadata
+            text = text.replace(/\{[^}]*\}/g, '');
+            text = text.replace(/^.*?Updated automatically every \d+ minutes/i, '');
+            
+            // Split on Lezione markers more aggressively
+            const parts = text.split(/(Lezione\s+\d+[^א-ת]*[א-ת][^L]*?)(?=Lezione|\s*$)/gi);
+            
+            lines = [];
+            for (let part of parts) {
+                part = part.trim();
+                if (part && part.length > 5 && !part.includes('{')) {
+                    // Split individual words by looking for Hebrew-dash-English-dash-transliteration pattern
+                    const wordLines = part.split(/(?=[א-ת]{2,}\s*[–—-]\s*[a-zA-Z])/);
+                    lines.push(...wordLines.map(l => l.trim()).filter(l => l.length > 0));
+                }
+            }
+        }
+        
+        const result = lines.join('\n');
+        dbg("normalized text preview", result.slice(0, 800));
+        dbg("total lines after split", lines.length);
     
-        // Re-insert logical breaks
-        text = text
-            .replace(/\s*(Lezione\s+\d+)/gi, "\n$1")
-            .replace(/\s*(מחיר|גוף|משפחה|דלת|שמיכה|רגע|גר|אני|מלא|משמעות|אני עייף|חג)/g, "\n$1")
-            .replace(/\s+/g, " ")
-            .replace(/\n+/g, "\n")
-            .trim();
-    
-        dbg("normalized text preview", text.slice(0, 500));
-    
-        return text;
+        return result;
     }
 
 function parseLectures(text) {
@@ -227,32 +256,19 @@ function parseLectures(text) {
             dbg(`line ${index} contains 'Lezione'`, line);
         }
 
-        if (/^Lezione\b/i.test(line)) {
+        if (/^Lezione\s+\d+/i.test(line)) {
             dbg(`LECTURE DETECTED at line ${index}`, line);
 
-            currentKey = line;
+            currentKey = line.split(/[–—-]/)[0].trim();
+            const titlePart = line.substring(currentKey.length).replace(/^[–—-]\s*/, '').trim();
+            
             lectures[currentKey] = {
-                name: line,
-                title: "",
+                name: currentKey,
+                title: titlePart || "",
                 lines: []
             };
-            awaitingTitle = true;
-            return;
-        }
-
-        if (currentKey && awaitingTitle) {
-            const normalized = line.replace(/[–—]/g, "-");
-            const isVocabLine = normalized.split(/\s*-\s*/).length >= 3;
-
-            dbg("checking possible title", { line, isVocabLine });
-
-            if (!isVocabLine) {
-                lectures[currentKey].title = line;
-                awaitingTitle = false;
-                dbg("title set for", currentKey);
-                return;
-            }
             awaitingTitle = false;
+            return;
         }
 
         if (currentKey) {
@@ -301,8 +317,8 @@ function buildLectureChips(lecturesMap) {
     });
 
     names.forEach(name => {
-        dbg("rendering lecture chip", data);
         const data = lecturesMap[name];
+        dbg("rendering lecture chip", data);
 
         const chip = document.createElement("label");
         chip.className = "lecture-chip";
@@ -438,14 +454,3 @@ function buildLectureChips(lecturesMap) {
 </script>
 </body>
 </html>
-
-
-
-
-
-
-
-
-
-
-
