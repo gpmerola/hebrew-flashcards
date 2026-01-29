@@ -249,21 +249,9 @@
         
         dbg("raw text length", text.length);
         
-        // Split into lines by looking for pattern: Hebrew - English - transliteration
-        // Match: Hebrew word(s) followed by – or - followed by English followed by – or - followed by transliteration
-        const vocabPattern = /([א-ת\s]{2,})\s*[–—-]\s*([a-zA-Z\s/]+?)\s*[–—-]\s*([a-z\s']+?)(?=\s+[א-ת]{2,}\s*[–—-]|Lezione|\s*$)/gi;
-        
         const lines = [];
-        let currentPos = 0;
         
-        // First, extract all Lezione headers
-        const lezMatch = text.matchAll(/Lezione\s+\d+[^א-ת]*/gi);
-        
-        for (const match of text.matchAll(/Lezione\s+\d+[^א-ת]*/gi)) {
-            lines.push(match[0].trim());
-        }
-        
-        // Now split the text into sections by Lezione
+        // Split the text into sections by Lezione
         const sections = text.split(/(Lezione\s+\d+[^א-ת]*)/gi);
         
         dbg("sections found", sections.length);
@@ -275,24 +263,17 @@
             if (/^Lezione\s+\d+/i.test(section)) {
                 lines.push(section);
             } else if (section.length > 0) {
-                // Extract vocabulary items from this section
-                const vocabMatches = [...section.matchAll(vocabPattern)];
+                // Split on Hebrew characters (each vocab entry starts with Hebrew)
+                // Look for pattern: Hebrew chars followed by dash
+                const entries = section.split(/(?=[א-ת]{2,}\s*[–—-])/);
                 
-                if (vocabMatches.length > 0) {
-                    vocabMatches.forEach(match => {
-                        const vocabLine = `${match[1].trim()} – ${match[2].trim()} – ${match[3].trim()}`;
-                        lines.push(vocabLine);
-                    });
-                } else {
-                    // Fallback: split on Hebrew characters
-                    const words = section.split(/(?=[א-ת]{2,})/);
-                    words.forEach(word => {
-                        const w = word.trim();
-                        if (w && w.includes('–') || w.includes('-')) {
-                            lines.push(w);
-                        }
-                    });
-                }
+                entries.forEach(entry => {
+                    const cleaned = entry.trim();
+                    // Must contain Hebrew and at least one dash
+                    if (cleaned && /[א-ת]/.test(cleaned) && /[–—-]/.test(cleaned)) {
+                        lines.push(cleaned);
+                    }
+                });
             }
         }
         
@@ -357,15 +338,18 @@ function extractItems(lines) {
 
     for (const rawLine of lines) {
         const normalized = rawLine.replace(/[–—]/g, "-");
-        const parts = normalized.split(/\s*-\s*/);
+        const parts = normalized.split(/\s*-\s*/).map(p => p.trim()).filter(p => p.length > 0);
 
-        if (parts.length >= 3) {
-            const heb = parts[0].trim();
-            const eng = parts[1].trim();
-            const trans = parts.slice(2).join(" - ").trim();
+        // Need at least Hebrew and English (transliteration is optional)
+        if (parts.length >= 2) {
+            const heb = parts[0];
+            const eng = parts[1];
+            const trans = parts.length >= 3 ? parts.slice(2).join(" - ") : parts[1]; // Use English as fallback if no transliteration
 
-            if (heb && eng && trans) {
+            // Must have Hebrew characters in first part and some English in second
+            if (heb && eng && /[א-ת]/.test(heb)) {
                 items.push({ heb, eng, trans });
+                dbg("extracted item", { heb, eng, trans });
             }
         }
     }
