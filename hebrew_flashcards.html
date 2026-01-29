@@ -331,8 +331,6 @@
         dbg("total CSV lines", lines.length);
         dbg("view mode", viewMode);
         
-        let currentThematic = null;
-        let currentChronological = null;
         let isHeader = true;
         
         lines.forEach((line, index) => {
@@ -340,7 +338,7 @@
             if (!line.trim()) return;
             
             // Skip header row
-            if (isHeader && (line.includes('Lezione') || line.includes('Hebrew') || line.includes('Ebraico'))) {
+            if (isHeader) {
                 isHeader = false;
                 dbg("Skipping header row:", line);
                 return;
@@ -364,76 +362,49 @@
             }
             parts.push(current.trim());
             
-            // CSV columns: Lezione (thematic), Hebrew, English, Transliteration, Cronologia
-            const thematicLezione = parts[0] || '';
-            const heb = parts[1] || '';
-            const eng = parts[2] || '';
-            const trans = parts[3] || '';
-            const chronologia = parts[4] || '';
+            // CSV columns: Parola in Ebraico, Traduzione, Traslitterazione, Area Tematica, Cronologia
+            const heb = parts[0] || '';
+            const eng = parts[1] || '';
+            const trans = parts[2] || '';
+            const areaTematica = parts[3] || '';
+            const cronologia = parts[4] || '';
             
-            // Update current thematic lecture if new one is defined
-            if (thematicLezione && /^Lezione\s+\d+/i.test(thematicLezione)) {
-                currentThematic = thematicLezione;
-                
-                if (viewMode === 'thematic' && !lectures[currentThematic]) {
-                    // Extract title after the dash if present
-                    const titleMatch = thematicLezione.match(/Lezione\s+\d+\s*[-–]\s*(.+)/i);
-                    const title = titleMatch ? titleMatch[1] : '';
-                    
-                    lectures[currentThematic] = {
-                        name: currentThematic.split(/[-–]/)[0].trim(),
-                        title: title,
-                        lines: []
-                    };
-                    
-                    dbg(`Thematic lecture created: ${currentThematic}`);
-                }
-            }
+            // Skip if no Hebrew word
+            if (!heb || !/[א-ת]/.test(heb)) return;
             
-            // Update current chronological lecture if new one is defined
-            if (chronologia && /^Lezione\s+\d+/i.test(chronologia)) {
-                currentChronological = chronologia;
-                
-                if (viewMode === 'chronological' && !lectures[currentChronological]) {
-                    const titleMatch = chronologia.match(/Lezione\s+\d+\s*[-–]\s*(.+)/i);
-                    const title = titleMatch ? titleMatch[1] : '';
-                    
-                    lectures[currentChronological] = {
-                        name: currentChronological.split(/[-–]/)[0].trim(),
-                        title: title,
-                        lines: []
-                    };
-                    
-                    dbg(`Chronological lecture created: ${currentChronological}`);
-                }
-            }
+            const entry = `${heb} – ${eng} – ${trans}`;
             
-            // Add vocabulary entry to the appropriate lecture (if we have Hebrew word)
-            if (heb && /[א-ת]/.test(heb) && eng && trans) {
-                const entry = `${heb} – ${eng} – ${trans}`;
-                
-                if (viewMode === 'thematic' && currentThematic) {
-                    if (!lectures[currentThematic]) {
-                        // Create lecture on the fly if not exists
-                        lectures[currentThematic] = {
-                            name: currentThematic.split(/[-–]/)[0].trim(),
+            if (viewMode === 'thematic') {
+                // Use Area Tematica as lecture name
+                if (areaTematica) {
+                    const lectureName = areaTematica;
+                    
+                    if (!lectures[lectureName]) {
+                        lectures[lectureName] = {
+                            name: lectureName,
                             title: '',
                             lines: []
                         };
+                        dbg(`Created thematic lecture: ${lectureName}`);
                     }
-                    lectures[currentThematic].lines.push(entry);
-                    dbg(`Added to thematic ${currentThematic}:`, heb);
-                } else if (viewMode === 'chronological' && currentChronological) {
-                    if (!lectures[currentChronological]) {
-                        // Create lecture on the fly if not exists
-                        lectures[currentChronological] = {
-                            name: currentChronological.split(/[-–]/)[0].trim(),
+                    
+                    lectures[lectureName].lines.push(entry);
+                }
+            } else if (viewMode === 'chronological') {
+                // Use Cronologia as lecture name
+                if (cronologia) {
+                    const lectureName = cronologia;
+                    
+                    if (!lectures[lectureName]) {
+                        lectures[lectureName] = {
+                            name: lectureName,
                             title: '',
                             lines: []
                         };
+                        dbg(`Created chronological lecture: ${lectureName}`);
                     }
-                    lectures[currentChronological].lines.push(entry);
-                    dbg(`Added to chronological ${currentChronological}:`, heb);
+                    
+                    lectures[lectureName].lines.push(entry);
                 }
             }
         });
