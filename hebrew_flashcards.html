@@ -194,21 +194,22 @@ function parseLectures(text) {
     text.split(/\r?\n/).forEach(raw => {
         const line = raw
             .replace(/^\uFEFF/, "")
-            .replace(/\u00A0/g, " ")
+            .replace(/[\u00A0\u200B\u200C\u200D]/g, " ")
+            .replace(/\s+/g, " ")
             .trim();
 
         if (!line) return;
 
-        if (/^Lezione\s+\d+/.test(line)) {
-            currentKey = line;
-            lectures[currentKey] = {
-                name: line,
-                title: "",
-                lines: []
-            };
-            awaitingTitle = true;
-            return;
-        }
+            if (/^Lezione\b/.test(line)) {
+                currentKey = line;
+                lectures[currentKey] = {
+                    name: line,
+                    title: "",
+                    lines: []
+                };
+                awaitingTitle = true;
+                return;
+            }
 
         if (currentKey && awaitingTitle) {
             const isVocabLine = line.split(/\s*-\s*/).length >= 3;
@@ -386,6 +387,7 @@ function buildLectureChips(lecturesMap) {
 </script>
 </body>
 </html>
+
 
 
 
