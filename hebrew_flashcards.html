@@ -208,6 +208,10 @@
             border-color: #2e7dff;
             color: #fff;
         }
+        .quick-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
         #cardHint {
             font-size: 0.8rem;
             color: #888;
@@ -260,6 +264,7 @@
         <button class="quick-btn" id="clearAllBtn">Clear All</button>
         <button class="quick-btn" id="studyUnlearnedBtn">Study Unlearned</button>
         <button class="quick-btn" id="reviewDifficultBtn">Review Difficult</button>
+        <button class="quick-btn" id="syncBtn">☁️ Sync Now</button>
     </div>
 
     <div id="lectures"></div>
@@ -452,8 +457,10 @@
     }
     
     const DOC_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSZ7JnAurRzW2CdTYdObIOhArDnssT1x7erlUrXZx4XzFLK-D-fV6S209nZVEz-7L1Fa43vtZyuSyQf/pub?output=csv";
+    const PROGRESS_API_URL = "https://script.google.com/macros/s/AKfycbzixsucigGRd0uCEezZn_bUaAV9wbCffhr5L720YVksD8Ah8Co91xh26NKkqjCyhG4B/exec";
     
     let currentView = 'thematic'; // 'thematic' or 'chronological'
+    let isSyncing = false;
 
     let lectures = {};
     let allItems = {};
@@ -492,22 +499,86 @@
     const difficultyButtonsEl = document.getElementById("difficultyButtons");
     const statsPanelEl = document.getElementById("statsPanel");
     
-    // Load progress from localStorage
-    function loadProgress() {
-        const saved = localStorage.getItem('hebrewFlashcardsProgress');
-        if (saved) {
-            try {
-                progress = JSON.parse(saved);
+    // Load progress from cloud (with localStorage fallback)
+    async function loadProgress() {
+        try {
+            statusEl.textContent = 'Loading your progress from cloud...';
+            
+            const response = await fetch(`${PROGRESS_API_URL}?action=load`);
+            const cloudProgress = await response.json();
+            
+            if (cloudProgress && !cloudProgress.error) {
+                progress = cloudProgress;
                 updateDailyStats();
                 updateStatsDisplay();
-            } catch (e) {
-                console.error('Error loading progress:', e);
+                
+                // Also save to localStorage as backup
+                localStorage.setItem('hebrewFlashcardsProgress', JSON.stringify(progress));
+                
+                dbg('Progress loaded from cloud', progress);
+                statusEl.textContent = 'Progress loaded from cloud ✓';
+            } else {
+                throw new Error(cloudProgress.error || 'Failed to load from cloud');
+            }
+        } catch (e) {
+            console.error('Cloud load failed, using localStorage:', e);
+            statusEl.textContent = 'Using local progress (cloud unavailable)';
+            
+            // Fallback to localStorage
+            const saved = localStorage.getItem('hebrewFlashcardsProgress');
+            if (saved) {
+                try {
+                    progress = JSON.parse(saved);
+                    updateDailyStats();
+                    updateStatsDisplay();
+                } catch (e) {
+                    console.error('Error loading from localStorage:', e);
+                }
             }
         }
     }
     
-    function saveProgress() {
+    async function saveProgress() {
+        // Always save to localStorage immediately
         localStorage.setItem('hebrewFlashcardsProgress', JSON.stringify(progress));
+        
+        // Debounced cloud save
+        if (isSyncing) return;
+        
+        isSyncing = true;
+        
+        // Wait a bit to batch multiple saves
+        setTimeout(async () => {
+            try {
+                const response = await fetch(`${PROGRESS_API_URL}?action=save`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(progress)
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    dbg('Progress saved to cloud', true);
+                    // Show subtle indicator
+                    const originalText = statusEl.textContent;
+                    statusEl.textContent = '☁️ Synced';
+                    setTimeout(() => {
+                        if (statusEl.textContent === '☁️ Synced') {
+                            statusEl.textContent = originalText;
+                        }
+                    }, 2000);
+                } else {
+                    console.error('Cloud save failed:', result.error);
+                }
+            } catch (e) {
+                console.error('Error saving to cloud:', e);
+            } finally {
+                isSyncing = false;
+            }
+        }, 1000); // 1 second debounce
     }
     
     function updateDailyStats() {
@@ -1086,13 +1157,35 @@ function buildLectureChips(lecturesMap) {
             alert('No difficult words found! All words are marked as easy. 🌟');
         }
     });
+    
+    // Sync button
+    document.getElementById('syncBtn').addEventListener('click', async () => {
+        const btn = document.getElementById('syncBtn');
+        btn.disabled = true;
+        btn.textContent = '⏳ Syncing...';
+        
+        try {
+            await saveProgress();
+            btn.textContent = '✓ Synced!';
+            setTimeout(() => {
+                btn.textContent = '☁️ Sync Now';
+                btn.disabled = false;
+            }, 2000);
+        } catch (e) {
+            btn.textContent = '✗ Failed';
+            setTimeout(() => {
+                btn.textContent = '☁️ Sync Now';
+                btn.disabled = false;
+            }, 2000);
+        }
+    });
 
 (async function init() {
     try {
         dbg("init started", true);
         
-        // Load saved progress
-        loadProgress();
+        // Load saved progress from cloud
+        await loadProgress();
         
         await loadDocument(currentView);
     } catch (e) {
