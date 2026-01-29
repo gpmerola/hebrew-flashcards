@@ -145,9 +145,23 @@
 </div>
 
 <script>
+
+
+    function normalizeGoogleDocUrl(url) {
+    if (url.includes("/pub")) {
+        return url.replace(/\/pub(\?.*)?$/, "/pub?output=txt");
+    }
+    if (url.includes("/export")) {
+        return url;
+    }
+    throw new Error("Unsupported Google Docs URL");
+    }
+    
     const DOC_ID = "1UVxgmP06_jXKVuc8vfRZqLFsXFrK22edaU-RQl2DHFs";
-    const EXPORT_URL =
-      "https://docs.google.com/document/d/e/2PACX-1vS9iILd7_1PfEdN8Gd-A1c7qOy7aZu_4Otg7gXDlxZnP0ZoXgRilCqsrud_gHBEkAydwSZG7H7wcUEC/pub?output=txt";
+    const RAW_DOC_URL =
+      "https://docs.google.com/document/d/e/2PACX-1vS9iILd7_1PfEdN8Gd-A1c7qOy7aZu_4Otg7gXDlxZnP0ZoXgRilCqsrud_gHBEkAydwSZG7H7wcUEC/pub";
+    
+    const EXPORT_URL = normalizeGoogleDocUrl(RAW_DOC_URL);
 
     let lectures = {};
     let allItems = {};
@@ -211,6 +225,8 @@ function parseLectures(text) {
 }
 
     function extractItems(lines) {
+        const normalized = line.replace(/[–—]/g, "-");
+        const parts = normalized.split(/\s*-\s*/);
         const items = [];
         for (const line of lines) {
             const parts = line.split(/\s*[–—-]\s*/);
@@ -363,6 +379,7 @@ function buildLectureChips(lecturesMap) {
 </script>
 </body>
 </html>
+
 
 
 
