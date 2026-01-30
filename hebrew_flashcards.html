@@ -1866,71 +1866,87 @@ function buildLectureChips(lecturesMap) {
         btn.disabled = false;
     });
     
-        // Batch Translate button
-    document.getElementById('batchTranslateBtn').addEventListener('click', async () => {
-        const items = collectSelectedItems();
+document.getElementById('batchTranslateBtn').addEventListener('click', async () => {
+    const items = collectSelectedItems();
+    
+    if (items.length === 0) {
+        alert('Select some lectures first!');
+        return;
+    }
+    
+    // Find words without Italian translation
+    const toTranslate = items.filter(item => !item.ita || item.ita.trim() === '');
+    
+    if (toTranslate.length === 0) {
+        alert(`✓ All ${items.length} selected words already have Italian translations!`);
+        return;
+    }
+    
+    if (!confirm(`Translate ${toTranslate.length} words to Italian and save to Google Sheet?\n\nThis will permanently update your spreadsheet.`)) {
+        return;
+    }
+    
+    const btn = document.getElementById('batchTranslateBtn');
+    btn.disabled = true;
+    
+    let translated = 0;
+    let errors = 0;
+    
+    // Process in batches of 5 (to avoid timeouts)
+    for (let i = 0; i < toTranslate.length; i += 5) {
+        const batch = toTranslate.slice(i, i + 5);
+        btn.textContent = `⏳ ${translated}/${toTranslate.length}...`;
         
-        if (items.length === 0) {
-            alert('Select some lectures first!');
-            return;
-        }
+        // Prepare words for API
+        const wordsToSend = batch.map(w => ({
+            heb: w.heb,
+            eng: w.eng,
+            trans: w.trans
+        }));
         
-        // Find words without Italian translation
-        const toTranslate = items.filter(item => !item.ita || item.ita.trim() === '');
-        
-        if (toTranslate.length === 0) {
-            alert(`✓ All ${items.length} selected words already have Italian translations!`);
-            return;
-        }
-        
-        if (!confirm(`Translate ${toTranslate.length} words to Italian?\n\nThis may take a moment.`)) {
-            return;
-        }
-        
-        const btn = document.getElementById('batchTranslateBtn');
-        btn.disabled = true;
-        
-        let translated = 0;
-        let errors = 0;
-        
-        // Process in batches of 10 (more reliable)
-        for (let i = 0; i < toTranslate.length; i += 10) {
-            const batch = toTranslate.slice(i, i + 10);
-            btn.textContent = `⏳ ${translated}/${toTranslate.length}...`;
+        try {
+            const response = await fetch(`${PROGRESS_API_URL}?action=translate_and_save`, {
+                method: 'POST',
+                body: JSON.stringify(wordsToSend)
+            });
             
-            try {
-                const translations = await batchTranslateToItalian(batch);
-                
-                if (translations && Array.isArray(translations) && translations.length === batch.length) {
-                    batch.forEach((item, idx) => {
-                        if (translations[idx]) {
-                            item.ita = translations[idx].trim();
-                            translated++;
-                            console.log(`✓ ${item.heb} → ${item.ita}`);
-                        } else {
-                            errors++;
+            const data = await response.json();
+            console.log('Translate and save response:', data);
+            
+            if (data.success && data.results) {
+                data.results.forEach(result => {
+                    if (result.success) {
+                        // Update local copy too
+                        const item = batch.find(b => b.heb === result.heb);
+                        if (item) {
+                            item.ita = result.ita;
                         }
-                    });
-                } else {
-                    console.error('Invalid translations response:', translations);
-                    errors += batch.length;
-                }
-            } catch (e) {
-                console.error('Batch error:', e);
+                        translated++;
+                        console.log(`✓ ${result.heb} → ${result.ita} (saved to sheet)`);
+                    } else {
+                        errors++;
+                    }
+                });
+            } else {
+                console.error('Batch error:', data.error);
                 errors += batch.length;
             }
-            
-            // Small delay between batches to avoid rate limiting
-            if (i + 10 < toTranslate.length) {
-                await new Promise(resolve => setTimeout(resolve, 500));
-            }
+        } catch (e) {
+            console.error('Batch error:', e);
+            errors += batch.length;
         }
         
-        alert(`✓ Translation complete!\n\nTranslated: ${translated} words\nErrors: ${errors} words`);
-        
-        btn.textContent = '🇮🇹 Batch Translate';
-        btn.disabled = false;
-    });
+        // Delay between batches to avoid rate limiting
+        if (i + 5 < toTranslate.length) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+    }
+    
+    alert(`✓ Translation complete!\n\nTranslated: ${translated} words\nErrors: ${errors} words\n\n✅ Saved to Google Sheet!`);
+    
+    btn.textContent = '🇮🇹 Batch Translate';
+    btn.disabled = false;
+});
     
     // Mode selector
     document.getElementById('modeSelector').addEventListener('change', (e) => {
@@ -2032,6 +2048,7 @@ document.querySelectorAll('.doc-btn').forEach(btn => {
 </script>
 </body>
 </html>
+
 
 
 
