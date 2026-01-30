@@ -644,30 +644,32 @@ Keep it simple and practical for Hebrew learners.`;
     }
     
     async function batchTranslateToItalian(words) {
-        // Translate up to 50 words at once
         const batch = words.slice(0, 50);
         const wordList = batch.map(w => `${w.heb} (${w.trans}) = ${w.eng}`).join('\n');
         
-        const prompt = `Translate these Hebrew words from English to Italian. Return ONLY a JSON array of translations in the same order.
-
-Words:
-${wordList}
-
-Return format: ["translation1", "translation2", ...]
-
-Be concise, one word or short phrase per translation.`;
+        const prompt = `Translate these Hebrew words from English to Italian...`;
         
-        const result = await callGemini(prompt, null, null); // No cache for batch
+        const result = await callGemini(prompt, null, null);
+        
+        // ADD THIS DEBUGGING
+        console.log('Batch translate raw result:', result);
+        
+        if (!result) {
+            console.error('No result returned from AI');
+            return null;
+        }
         
         try {
-            // Parse JSON response
             const jsonMatch = result.match(/\[.*\]/s);
+            console.log('JSON match:', jsonMatch);
+            
             if (jsonMatch) {
                 const translations = JSON.parse(jsonMatch[0]);
+                console.log('Parsed translations:', translations);
                 return translations;
             }
         } catch (e) {
-            console.error('Batch translation parse error:', e);
+            console.error('Batch translation parse error:', e, 'Raw result:', result);
         }
         
         return null;
@@ -1988,3 +1990,4 @@ document.querySelectorAll('.doc-btn').forEach(btn => {
 </script>
 </body>
 </html>
+
