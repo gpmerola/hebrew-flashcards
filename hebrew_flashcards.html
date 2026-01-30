@@ -657,68 +657,73 @@ Keep it simple and practical for Hebrew learners.`;
         return await callGemini(prompt, cacheKey, 'example');
     }
     
-    async function batchTranslateToItalian(words) {
-        // Process in smaller batches of 10 for reliability
-        const batch = words.slice(0, 10);
-        const wordList = batch.map(w => `${w.heb} (${w.trans}) = ${w.eng}`).join('\n');
-        
-        const prompt = `Here are ${batch.length} Hebrew words to translate to Italian:
+async function batchTranslateToItalian(words) {
+    // Process in smaller batches of 10 for reliability
+    const batch = words.slice(0, 10);
     
-    ${wordList}
+    // Build word list - one per line, clean format
+    const wordLines = batch.map(w => `${w.heb} (${w.trans}) = ${w.eng}`);
+    const wordList = wordLines.join('\n');
     
-    Return ONLY a JSON array with exactly ${batch.length} Italian translations, in the same order.
-    Example format: ["prezzo", "corpo", "porta"]
+    // Build prompt - no extra indentation!
+    const prompt = `Translate these ${batch.length} Hebrew words to Italian.
+
+Words:
+${wordList}
+
+IMPORTANT: Return ONLY a JSON array with exactly ${batch.length} Italian translations.
+Format: ["translation1", "translation2", ...]
+Start your response with [ and end with ] - no other text.`;
     
-    Your response must start with [ and end with ] - nothing else.`;
-        
-        console.log('=== BATCH TRANSLATE DEBUG ===');
-        console.log('Batch size:', batch.length);
-        console.log('Prompt length:', prompt.length);
-        
-        const result = await callGemini(prompt, null, null);
-        
-        console.log('Batch translate raw result:', result);
-        console.log('Result type:', typeof result);
-        
-        if (!result) {
-            console.error('Result is null/undefined');
-            return null;
-        }
-        
-        try {
-            // Clean up the response - remove markdown, whitespace, newlines
-            let cleanResult = result
-                .replace(/```json\n?/gi, '')
-                .replace(/```\n?/g, '')
-                .replace(/\n/g, '')
-                .trim();
-            
-            console.log('Cleaned result:', cleanResult);
-            
-            // Try to parse directly first (most common case)
-            if (cleanResult.startsWith('[') && cleanResult.endsWith(']')) {
-                const translations = JSON.parse(cleanResult);
-                console.log('✅ Parsed translations:', translations);
-                return translations;
-            }
-            
-            // Fallback: find JSON array in response
-            const jsonMatch = cleanResult.match(/\[[\s\S]*?\]/);
-            
-            if (jsonMatch) {
-                const translations = JSON.parse(jsonMatch[0]);
-                console.log('✅ Parsed translations (via regex):', translations);
-                return translations;
-            } else {
-                console.error('No JSON array found in:', cleanResult);
-            }
-        } catch (e) {
-            console.error('Parse error:', e.message);
-            console.error('Attempted to parse:', result);
-        }
-        
+    console.log('=== BATCH TRANSLATE DEBUG ===');
+    console.log('Batch size:', batch.length);
+    console.log('Prompt:', prompt);
+    console.log('Prompt length:', prompt.length);
+    
+    const result = await callGemini(prompt, null, null);
+    
+    console.log('Batch translate raw result:', result);
+    console.log('Result type:', typeof result);
+    
+    if (!result) {
+        console.error('Result is null/undefined');
         return null;
     }
+    
+    try {
+        // Clean up the response
+        let cleanResult = result
+            .replace(/```json\n?/gi, '')
+            .replace(/```\n?/g, '')
+            .replace(/\n/g, '')
+            .trim();
+        
+        console.log('Cleaned result:', cleanResult);
+        
+        // Try to parse directly first
+        if (cleanResult.startsWith('[') && cleanResult.endsWith(']')) {
+            const translations = JSON.parse(cleanResult);
+            console.log('✅ Parsed translations:', translations);
+            return translations;
+        }
+        
+        // Fallback: find JSON array in response
+        const jsonMatch = cleanResult.match(/\[.*\]/);
+        
+        if (jsonMatch) {
+            const translations = JSON.parse(jsonMatch[0]);
+            console.log('✅ Parsed translations (via regex):', translations);
+            return translations;
+        } else {
+            console.error('No JSON array found in:', cleanResult);
+        }
+    } catch (e) {
+        console.error('Parse error:', e.message);
+        console.error('Attempted to parse:', result);
+    }
+    
+    return null;
+}
     
     async function startAIConversation() {
         const selectedWords = collectSelectedItems().slice(0, 10);
@@ -2035,6 +2040,7 @@ document.querySelectorAll('.doc-btn').forEach(btn => {
 </script>
 </body>
 </html>
+
 
 
 
