@@ -399,6 +399,7 @@
         
         let isHeader = true;
         let hasItalianColumn = false;
+        let italianColumnIndex = -1;
         
         lines.forEach((line, index) => {
             // Skip empty lines
@@ -407,8 +408,16 @@
             // Check header row
             if (isHeader) {
                 isHeader = false;
-                hasItalianColumn = line.toLowerCase().includes('italiano') || line.toLowerCase().includes('italian');
-                dbg("Has Italian column:", hasItalianColumn);
+                const headerLower = line.toLowerCase();
+                hasItalianColumn = headerLower.includes('italiano') || headerLower.includes('italian');
+                
+                if (hasItalianColumn) {
+                    // Find column index
+                    const cols = line.split(/\t|,/);
+                    italianColumnIndex = cols.findIndex(c => c.toLowerCase().includes('italiano') || c.toLowerCase().includes('italian'));
+                }
+                
+                dbg("Has Italian column:", hasItalianColumn, "at index:", italianColumnIndex);
                 dbg("Skipping header row:", line);
                 return;
             }
@@ -422,7 +431,7 @@
                 const char = line[i];
                 if (char === '"') {
                     inQuotes = !inQuotes;
-                } else if (char === ',' && !inQuotes) {
+                } else if ((char === ',' || char === '\t') && !inQuotes) {
                     parts.push(current.trim());
                     current = '';
                 } else {
@@ -437,7 +446,7 @@
             const trans = parts[2] || '';
             const areaTematica = parts[3] || '';
             const cronologia = parts[4] || '';
-            const ita = parts[5] || ''; // Italian translation if exists
+            const ita = hasItalianColumn && italianColumnIndex >= 0 ? (parts[italianColumnIndex] || '') : '';
             
             // Skip if no Hebrew word
             if (!heb || !/[א-ת]/.test(heb)) return;
@@ -445,12 +454,11 @@
             const entry = {
                 heb,
                 eng,
-                ita: ita || eng, // Fallback to English if no Italian
+                ita: ita || '', // Don't fallback to English, keep empty if no Italian
                 trans
             };
             
             if (viewMode === 'thematic') {
-                // Use Area Tematica as lecture name
                 if (areaTematica) {
                     const lectureName = areaTematica;
                     
@@ -468,7 +476,6 @@
                     lectures[lectureName].entries.push(entry);
                 }
             } else if (viewMode === 'chronological') {
-                // Use Cronologia as lecture name
                 if (cronologia) {
                     const lectureName = cronologia;
                     
@@ -1270,7 +1277,7 @@ function buildLectureChips(lecturesMap) {
     }
     
     function showFlashcardQuestion() {
-        const targetLang = useItalian ? current.ita : current.eng;
+        const targetLang = useItalian ? (current.ita || current.eng) : current.eng; // Fallback to English
         const langName = useItalian ? "Italian" : "English";
         
         answerEl.textContent = "";
@@ -1825,14 +1832,19 @@ function buildLectureChips(lecturesMap) {
         }
         
         // Find words without Italian translation
-        const toTranslate = items.filter(item => !item.ita || item.ita === item.eng);
+        const toTranslate = items.filter(item => !item.ita || item.ita.trim() === '');
         
         if (toTranslate.length === 0) {
-            alert('All selected words already have Italian translations! ✓');
+            alert(`✓ All ${items.length} selected words already have Italian translations!\n\nNo translation needed.`);
             return;
         }
         
-        if (!confirm(`Translate ${toTranslate.length} words to Italian?\n\nThis will use ~${Math.ceil(toTranslate.length / 50)} AI calls (batches of 50).`)) {
+        const message = `Found ${toTranslate.length} words to translate (out of ${items.length} total).\n\n` +
+                       `This will use ~${Math.ceil(toTranslate.length / 50)} AI calls.\n\n` +
+                       `Examples to translate:\n${toTranslate.slice(0, 3).map(w => `${w.heb} (${w.eng})`).join('\n')}\n\n` +
+                       `Continue?`;
+        
+        if (!confirm(message)) {
             return;
         }
         
@@ -1841,6 +1853,7 @@ function buildLectureChips(lecturesMap) {
         btn.textContent = '⏳ Translating...';
         
         let translated = 0;
+        let errors = 0;
         
         // Process in batches of 50
         for (let i = 0; i < toTranslate.length; i += 50) {
@@ -1850,15 +1863,26 @@ function buildLectureChips(lecturesMap) {
             const translations = await batchTranslateToItalian(batch);
             
             if (translations && translations.length === batch.length) {
-                // Update items with translations
                 batch.forEach((item, idx) => {
-                    item.ita = translations[idx];
+                    if (translations[idx]) {
+                        item.ita = translations[idx].trim();
+                        translated++;
+                    } else {
+                        errors++;
+                    }
                 });
-                translated += batch.length;
+            } else {
+                errors += batch.length;
             }
         }
         
-        alert(`✓ Translated ${translated} words to Italian!\n\nNote: Translations are cached and saved to Google Sheet.`);
+        const summary = `✓ Translation complete!\n\n` +
+                       `Successfully translated: ${translated} words\n` +
+                       `Errors: ${errors} words\n\n` +
+                       `Translations are cached in Google Sheet.\n` +
+                       `Add "Italiano" column to your CSV to save them permanently.`;
+        
+        alert(summary);
         
         btn.textContent = '🇮🇹 Batch Translate';
         btn.disabled = false;
