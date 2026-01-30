@@ -316,7 +316,12 @@
             <option value="flashcard">Flashcard</option>
             <option value="multiple-choice">Multiple Choice</option>
             <option value="typing">Type Answer</option>
+            <option value="voice">🎤 Voice Mode</option>
         </select>
+        <label style="display: flex; align-items: center; gap: 0.3rem; font-size: 0.85rem; color: #888; margin-left: 1rem;">
+            <input type="checkbox" id="useItalianToggle" checked style="cursor: pointer;">
+            Use Italian (🇮🇹) instead of English
+        </label>
     </div>
 
     <div id="topDifficult" style="margin-top: 0.8rem; padding: 0.8rem; background: #181818; border: 1px solid #333; border-radius: 0.8rem; display: none;">
@@ -390,14 +395,17 @@
         dbg("view mode", viewMode);
         
         let isHeader = true;
+        let hasItalianColumn = false;
         
         lines.forEach((line, index) => {
             // Skip empty lines
             if (!line.trim()) return;
             
-            // Skip header row
+            // Check header row
             if (isHeader) {
                 isHeader = false;
+                hasItalianColumn = line.toLowerCase().includes('italiano') || line.toLowerCase().includes('italian');
+                dbg("Has Italian column:", hasItalianColumn);
                 dbg("Skipping header row:", line);
                 return;
             }
@@ -420,17 +428,23 @@
             }
             parts.push(current.trim());
             
-            // CSV columns: Parola in Ebraico, Traduzione, Traslitterazione, Area Tematica, Cronologia
+            // CSV columns: Parola in Ebraico, Traduzione (English), Traslitterazione, Area Tematica, Cronologia, [Italiano]
             const heb = parts[0] || '';
             const eng = parts[1] || '';
             const trans = parts[2] || '';
             const areaTematica = parts[3] || '';
             const cronologia = parts[4] || '';
+            const ita = parts[5] || ''; // Italian translation if exists
             
             // Skip if no Hebrew word
             if (!heb || !/[א-ת]/.test(heb)) return;
             
-            const entry = `${heb} – ${eng} – ${trans}`;
+            const entry = {
+                heb,
+                eng,
+                ita: ita || eng, // Fallback to English if no Italian
+                trans
+            };
             
             if (viewMode === 'thematic') {
                 // Use Area Tematica as lecture name
@@ -441,12 +455,14 @@
                         lectures[lectureName] = {
                             name: lectureName,
                             title: '',
-                            lines: []
+                            lines: [],
+                            entries: []
                         };
                         dbg(`Created thematic lecture: ${lectureName}`);
                     }
                     
-                    lectures[lectureName].lines.push(entry);
+                    lectures[lectureName].lines.push(`${heb} – ${eng} – ${trans}`);
+                    lectures[lectureName].entries.push(entry);
                 }
             } else if (viewMode === 'chronological') {
                 // Use Cronologia as lecture name
@@ -457,12 +473,14 @@
                         lectures[lectureName] = {
                             name: lectureName,
                             title: '',
-                            lines: []
+                            lines: [],
+                            entries: []
                         };
                         dbg(`Created chronological lecture: ${lectureName}`);
                     }
                     
-                    lectures[lectureName].lines.push(entry);
+                    lectures[lectureName].lines.push(`${heb} – ${eng} – ${trans}`);
+                    lectures[lectureName].entries.push(entry);
                 }
             }
         });
@@ -472,8 +490,59 @@
 
         return lectures;
     }
+    
+    // Fuzzy string matching (Levenshtein distance)
+    function levenshteinDistance(str1, str2) {
+        str1 = str1.toLowerCase().trim();
+        str2 = str2.toLowerCase().trim();
+        
+        const matrix = [];
+        
+        for (let i = 0; i <= str2.length; i++) {
+            matrix[i] = [i];
+        }
+        
+        for (let j = 0; j <= str1.length; j++) {
+            matrix[0][j] = j;
+        }
+        
+        for (let i = 1; i <= str2.length; i++) {
+            for (let j = 1; j <= str1.length; j++) {
+                if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
+                    matrix[i][j] = matrix[i - 1][j - 1];
+                } else {
+                    matrix[i][j] = Math.min(
+                        matrix[i - 1][j - 1] + 1,
+                        matrix[i][j - 1] + 1,
+                        matrix[i - 1][j] + 1
+                    );
+                }
+            }
+        }
+        
+        return matrix[str2.length][str1.length];
+    }
+    
+    function fuzzyMatch(input, target) {
+        const distance = levenshteinDistance(input, target);
+        const maxLength = Math.max(input.length, target.length);
+        const similarity = 1 - (distance / maxLength);
+        
+        return {
+            distance,
+            similarity,
+            isClose: similarity >= 0.8, // 80% similarity threshold
+            isExact: input.toLowerCase().trim() === target.toLowerCase().trim()
+        };
+    }
 
-    function extractItems(lines) {
+    function extractItems(lines, entries) {
+        // If we have entries objects with Italian, use those
+        if (entries && entries.length > 0) {
+            return entries;
+        }
+        
+        // Fallback: parse from lines (old format)
         const items = [];
 
         dbg("extractItems called with", lines.length);
@@ -488,7 +557,7 @@
                 const trans = parts.length >= 3 ? parts.slice(2).join(" - ") : parts[1];
 
                 if (heb && eng && /[א-ת]/.test(heb)) {
-                    items.push({ heb, eng, trans });
+                    items.push({ heb, eng, ita: eng, trans });
                     dbg("extracted item", { heb, eng, trans });
                 }
             }
@@ -500,10 +569,12 @@
     
     const DOC_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSZ7JnAurRzW2CdTYdObIOhArDnssT1x7erlUrXZx4XzFLK-D-fV6S209nZVEz-7L1Fa43vtZyuSyQf/pub?output=csv";
     const PROGRESS_API_URL = "https://script.google.com/macros/s/AKfycbzixsucigGRd0uCEezZn_bUaAV9wbCffhr5L720YVksD8Ah8Co91xh26NKkqjCyhG4B/exec";
+    const SPREADSHEET_ID = "12zqQ6SwFNTy1Sy72-1PUcnAfI35V0Dw8LX6hBdAZxDo"; // Your actual spreadsheet ID
     
     let currentView = 'thematic'; // 'thematic' or 'chronological'
     let isSyncing = false;
-    let studyMode = 'flashcard'; // 'flashcard', 'multiple-choice', 'typing'
+    let studyMode = 'flashcard'; // 'flashcard', 'multiple-choice', 'typing', 'voice'
+    let useItalian = true; // Use Italian instead of English
 
     let lectures = {};
     let allItems = {};
@@ -935,15 +1006,18 @@ function buildLectureChips(lecturesMap) {
     }
     
     function showFlashcardQuestion() {
+        const targetLang = useItalian ? current.ita : current.eng;
+        const langName = useItalian ? "Italian" : "English";
+        
         answerEl.textContent = "";
         cardHintEl.textContent = "Tap to reveal answer. 🔊 Tap Hebrew text to hear pronunciation.";
 
         if (current.mode === "heb_to_eng") {
             questionEl.innerHTML = `<span class="hebrew-audio" onclick="speakHebrew('${current.heb.replace(/'/g, "\\'")}'); event.stopPropagation();">${current.heb}</span>   (${current.trans})`;
-            modeLabelEl.textContent = "Translate to English.";
+            modeLabelEl.textContent = `Translate to ${langName}.`;
             setTimeout(() => speakHebrew(current.heb), 300);
         } else {
-            questionEl.textContent = current.eng;
+            questionEl.textContent = targetLang;
             modeLabelEl.textContent = "Translate to Hebrew.";
         }
     }
@@ -1061,20 +1135,46 @@ function buildLectureChips(lecturesMap) {
     }
     
     function checkTypingAnswer(userAnswer) {
-        const correctAnswer = current.mode === "heb_to_eng" ? current.eng.toLowerCase() : current.heb;
-        const isCorrect = userAnswer.toLowerCase() === correctAnswer.toLowerCase();
+        const targetLang = useItalian ? current.ita : current.eng;
+        const correctAnswer = current.mode === "heb_to_eng" ? targetLang : current.heb;
+        
+        const match = fuzzyMatch(userAnswer, correctAnswer);
         
         const input = document.getElementById('typingInput');
         input.disabled = true;
-        input.style.borderColor = isCorrect ? '#22c55e' : '#ef4444';
-        input.style.background = isCorrect ? '#1a4d2e' : '#4d1a1a';
         
-        recordDifficulty(isCorrect ? 'easy' : 'hard');
+        if (match.isExact) {
+            // Perfect match
+            input.style.borderColor = '#22c55e';
+            input.style.background = '#1a4d2e';
+            recordDifficulty('easy');
+        } else if (match.isClose) {
+            // Close enough (80%+ similarity)
+            input.style.borderColor = '#eab308';
+            input.style.background = '#4d3d1a';
+            recordDifficulty('medium');
+        } else {
+            // Wrong
+            input.style.borderColor = '#ef4444';
+            input.style.background = '#4d1a1a';
+            recordDifficulty('hard');
+        }
+        
+        // Show feedback
+        let feedback = '';
+        if (match.isExact) {
+            feedback = '<div style="color: #22c55e; margin-bottom: 0.5rem;">✓ Perfect!</div>';
+        } else if (match.isClose) {
+            feedback = `<div style="color: #eab308; margin-bottom: 0.5rem;">⚠ Close! Minor errors (${Math.round(match.similarity * 100)}% match)</div>`;
+            feedback += `<div style="font-size: 0.9rem; color: #bbb;">Your answer: "${userAnswer}"</div>`;
+        } else {
+            feedback = '<div style="color: #ef4444; margin-bottom: 0.5rem;">✗ Incorrect</div>';
+        }
         
         if (current.mode === "heb_to_eng") {
-            answerEl.innerHTML = `<div style="margin-bottom: 0.5rem;">${input.outerHTML}</div><div>Correct: ${current.eng} – ${current.trans}</div>`;
+            answerEl.innerHTML = `<div style="margin-bottom: 0.5rem;">${input.outerHTML}</div>${feedback}<div>Correct: ${correctAnswer} – ${current.trans}</div>`;
         } else {
-            answerEl.innerHTML = `<div style="margin-bottom: 0.5rem;">${input.outerHTML}</div><div><span class="hebrew-audio" onclick="speakHebrew('${current.heb.replace(/'/g, "\\'")}'); event.stopPropagation();">${current.heb}</span>   (${current.trans})</div>`;
+            answerEl.innerHTML = `<div style="margin-bottom: 0.5rem;">${input.outerHTML}</div>${feedback}<div><span class="hebrew-audio" onclick="speakHebrew('${current.heb.replace(/'/g, "\\'")}'); event.stopPropagation();">${current.heb}</span>   (${current.trans})</div>`;
             setTimeout(() => speakHebrew(current.heb), 200);
         }
         
@@ -1085,14 +1185,16 @@ function buildLectureChips(lecturesMap) {
             if (state === "answer") {
                 nextCard();
             }
-        }, 1500);
+        }, 2000);
     }
 
     function showAnswer() {
         if (!current) return;
+        
+        const targetLang = useItalian ? current.ita : current.eng;
 
         if (current.mode === "heb_to_eng") {
-            answerEl.textContent = `${current.eng} – ${current.trans}`;
+            answerEl.textContent = `${targetLang} – ${current.trans}`;
         } else {
             answerEl.innerHTML = `<span class="hebrew-audio" onclick="speakHebrew('${current.heb.replace(/'/g, "\\'")}'); event.stopPropagation();">${current.heb}</span>   (${current.trans})`;
             // Auto-play the Hebrew pronunciation when showing answer
@@ -1356,6 +1458,12 @@ function buildLectureChips(lecturesMap) {
         dbg('Study mode changed to:', studyMode);
     });
     
+    // Italian toggle
+    document.getElementById('useItalianToggle').addEventListener('change', (e) => {
+        useItalian = e.target.checked;
+        dbg('Use Italian:', useItalian);
+    });
+    
     // Sync button
     document.getElementById('syncBtn').addEventListener('click', async () => {
         const btn = document.getElementById('syncBtn');
@@ -1405,7 +1513,7 @@ async function loadDocument(viewMode) {
 
         const itemsMap = {};
         Object.keys(lectures).forEach(name => {
-            itemsMap[name] = extractItems(lectures[name].lines);
+            itemsMap[name] = extractItems(lectures[name].lines, lectures[name].entries);
         });
 
         allItems = itemsMap;
