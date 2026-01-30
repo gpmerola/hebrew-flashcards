@@ -673,6 +673,13 @@ Be concise, one word or short phrase per translation.`;
             return;
         }
         
+        // Set state and show loading
+        state = "question";
+        questionEl.innerHTML = '<div style="text-align: center; padding: 2rem; color: #888;">🤖 Starting AI conversation...</div>';
+        answerEl.innerHTML = '';
+        cardHintEl.textContent = 'Loading AI tutor...';
+        modeLabelEl.textContent = 'AI Conversation Mode';
+        
         // Check if we have a cached conversation start
         const wordHashes = selectedWords.map(w => w.heb).join(',');
         const cacheKey = `conv_start::${wordHashes}`;
@@ -691,14 +698,24 @@ Rules:
 
 Start the conversation now with a greeting and a simple question using one of these words.`;
         
-        const response = await callGemini(prompt, cacheKey, 'conversation');
-        
-        if (response) {
-            conversationHistory = [
-                { role: 'ai', content: response }
-            ];
+        try {
+            const response = await callGemini(prompt, cacheKey, 'conversation');
             
-            displayConversation();
+            if (response) {
+                conversationHistory = [
+                    { role: 'ai', content: response }
+                ];
+                
+                state = "answer"; // Ready for user input
+                displayConversation();
+            } else {
+                questionEl.innerHTML = '<div style="text-align: center; padding: 2rem; color: #ef4444;">❌ Error starting conversation. Try again.</div>';
+                cardHintEl.textContent = 'Click Start to retry';
+            }
+        } catch (error) {
+            console.error('Conversation error:', error);
+            questionEl.innerHTML = '<div style="text-align: center; padding: 2rem; color: #ef4444;">❌ Error: ' + error.message + '</div>';
+            cardHintEl.textContent = 'Click Start to retry';
         }
     }
     
@@ -1530,9 +1547,9 @@ function buildLectureChips(lecturesMap) {
     });
 
     cardEl.addEventListener("click", () => {
-        // Don't handle clicks in multiple choice or typing mode
-        if (studyMode === 'multiple-choice' || studyMode === 'typing') {
-            if (state === "answer") {
+        // Don't handle clicks in multiple choice, typing, or conversation mode
+        if (studyMode === 'multiple-choice' || studyMode === 'typing' || studyMode === 'conversation') {
+            if (state === "answer" && studyMode !== 'conversation') {
                 nextCard();
             }
             return;
