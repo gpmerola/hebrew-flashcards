@@ -644,32 +644,63 @@ Keep it simple and practical for Hebrew learners.`;
     }
     
     async function batchTranslateToItalian(words) {
-        const batch = words.slice(0, 50);
+        // Process in smaller batches of 10 for reliability
+        const batch = words.slice(0, 10);
         const wordList = batch.map(w => `${w.heb} (${w.trans}) = ${w.eng}`).join('\n');
         
-        const prompt = `Translate these Hebrew words from English to Italian...`;
+        const prompt = `Here are ${batch.length} Hebrew words to translate to Italian:
+    
+    ${wordList}
+    
+    Return ONLY a JSON array with exactly ${batch.length} Italian translations, in the same order.
+    Example format: ["prezzo", "corpo", "porta"]
+    
+    Your response must start with [ and end with ] - nothing else.`;
+        
+        console.log('=== BATCH TRANSLATE DEBUG ===');
+        console.log('Batch size:', batch.length);
+        console.log('Prompt length:', prompt.length);
         
         const result = await callGemini(prompt, null, null);
         
-        // ADD THIS DEBUGGING
         console.log('Batch translate raw result:', result);
+        console.log('Result type:', typeof result);
         
         if (!result) {
-            console.error('No result returned from AI');
+            console.error('Result is null/undefined');
             return null;
         }
         
         try {
-            const jsonMatch = result.match(/\[.*\]/s);
-            console.log('JSON match:', jsonMatch);
+            // Clean up the response - remove markdown, whitespace, newlines
+            let cleanResult = result
+                .replace(/```json\n?/gi, '')
+                .replace(/```\n?/g, '')
+                .replace(/\n/g, '')
+                .trim();
+            
+            console.log('Cleaned result:', cleanResult);
+            
+            // Try to parse directly first (most common case)
+            if (cleanResult.startsWith('[') && cleanResult.endsWith(']')) {
+                const translations = JSON.parse(cleanResult);
+                console.log('✅ Parsed translations:', translations);
+                return translations;
+            }
+            
+            // Fallback: find JSON array in response
+            const jsonMatch = cleanResult.match(/\[[\s\S]*?\]/);
             
             if (jsonMatch) {
                 const translations = JSON.parse(jsonMatch[0]);
-                console.log('Parsed translations:', translations);
+                console.log('✅ Parsed translations (via regex):', translations);
                 return translations;
+            } else {
+                console.error('No JSON array found in:', cleanResult);
             }
         } catch (e) {
-            console.error('Batch translation parse error:', e, 'Raw result:', result);
+            console.error('Parse error:', e.message);
+            console.error('Attempted to parse:', result);
         }
         
         return null;
@@ -1824,7 +1855,7 @@ function buildLectureChips(lecturesMap) {
         btn.disabled = false;
     });
     
-    // Batch Translate button
+        // Batch Translate button
     document.getElementById('batchTranslateBtn').addEventListener('click', async () => {
         const items = collectSelectedItems();
         
@@ -1837,54 +1868,54 @@ function buildLectureChips(lecturesMap) {
         const toTranslate = items.filter(item => !item.ita || item.ita.trim() === '');
         
         if (toTranslate.length === 0) {
-            alert(`✓ All ${items.length} selected words already have Italian translations!\n\nNo translation needed.`);
+            alert(`✓ All ${items.length} selected words already have Italian translations!`);
             return;
         }
         
-        const message = `Found ${toTranslate.length} words to translate (out of ${items.length} total).\n\n` +
-                       `This will use ~${Math.ceil(toTranslate.length / 50)} AI calls.\n\n` +
-                       `Examples to translate:\n${toTranslate.slice(0, 3).map(w => `${w.heb} (${w.eng})`).join('\n')}\n\n` +
-                       `Continue?`;
-        
-        if (!confirm(message)) {
+        if (!confirm(`Translate ${toTranslate.length} words to Italian?\n\nThis may take a moment.`)) {
             return;
         }
         
         const btn = document.getElementById('batchTranslateBtn');
         btn.disabled = true;
-        btn.textContent = '⏳ Translating...';
         
         let translated = 0;
         let errors = 0;
         
-        // Process in batches of 50
-        for (let i = 0; i < toTranslate.length; i += 50) {
-            const batch = toTranslate.slice(i, i + 50);
-            btn.textContent = `⏳ ${translated}/${toTranslate.length}`;
+        // Process in batches of 10 (more reliable)
+        for (let i = 0; i < toTranslate.length; i += 10) {
+            const batch = toTranslate.slice(i, i + 10);
+            btn.textContent = `⏳ ${translated}/${toTranslate.length}...`;
             
-            const translations = await batchTranslateToItalian(batch);
-            
-            if (translations && translations.length === batch.length) {
-                batch.forEach((item, idx) => {
-                    if (translations[idx]) {
-                        item.ita = translations[idx].trim();
-                        translated++;
-                    } else {
-                        errors++;
-                    }
-                });
-            } else {
+            try {
+                const translations = await batchTranslateToItalian(batch);
+                
+                if (translations && Array.isArray(translations) && translations.length === batch.length) {
+                    batch.forEach((item, idx) => {
+                        if (translations[idx]) {
+                            item.ita = translations[idx].trim();
+                            translated++;
+                            console.log(`✓ ${item.heb} → ${item.ita}`);
+                        } else {
+                            errors++;
+                        }
+                    });
+                } else {
+                    console.error('Invalid translations response:', translations);
+                    errors += batch.length;
+                }
+            } catch (e) {
+                console.error('Batch error:', e);
                 errors += batch.length;
+            }
+            
+            // Small delay between batches to avoid rate limiting
+            if (i + 10 < toTranslate.length) {
+                await new Promise(resolve => setTimeout(resolve, 500));
             }
         }
         
-        const summary = `✓ Translation complete!\n\n` +
-                       `Successfully translated: ${translated} words\n` +
-                       `Errors: ${errors} words\n\n` +
-                       `Translations are cached in Google Sheet.\n` +
-                       `Add "Italiano" column to your CSV to save them permanently.`;
-        
-        alert(summary);
+        alert(`✓ Translation complete!\n\nTranslated: ${translated} words\nErrors: ${errors} words`);
         
         btn.textContent = '🇮🇹 Batch Translate';
         btn.disabled = false;
@@ -1990,4 +2021,5 @@ document.querySelectorAll('.doc-btn').forEach(btn => {
 </script>
 </body>
 </html>
+
 
