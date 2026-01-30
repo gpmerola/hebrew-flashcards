@@ -307,6 +307,7 @@
         <button class="quick-btn" id="reviewDifficultBtn">Review Difficult</button>
         <button class="quick-btn" id="reviewSessionBtn">📝 Review Session</button>
         <button class="quick-btn" id="suggestLectureBtn">💡 Suggest Next</button>
+        <button class="quick-btn" id="exampleSentenceBtn">🤖 Example Sentence</button>
         <button class="quick-btn" id="syncBtn">☁️ Sync Now</button>
     </div>
 
@@ -317,6 +318,7 @@
             <option value="multiple-choice">Multiple Choice</option>
             <option value="typing">Type Answer</option>
             <option value="voice">🎤 Voice Mode</option>
+            <option value="conversation">💬 AI Conversation</option>
         </select>
         <label style="display: flex; align-items: center; gap: 0.3rem; font-size: 0.85rem; color: #888; margin-left: 1rem;">
             <input type="checkbox" id="useItalianToggle" checked style="cursor: pointer;">
@@ -531,9 +533,162 @@
         return {
             distance,
             similarity,
-            isClose: similarity >= 0.8, // 80% similarity threshold
+            isClose: similarity >= 0.8,
             isExact: input.toLowerCase().trim() === target.toLowerCase().trim()
         };
+    }
+    
+    // Gemini AI functions
+    async function callGemini(prompt) {
+        try {
+            const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    contents: [{
+                        parts: [{
+                            text: prompt
+                        }]
+                    }]
+                })
+            });
+            
+            const data = await response.json();
+            return data.candidates[0].content.parts[0].text;
+        } catch (error) {
+            console.error('Gemini API error:', error);
+            return null;
+        }
+    }
+    
+    async function translateToItalian(hebrewWord, englishWord, transliteration) {
+        const prompt = `Translate this Hebrew word to Italian:
+Hebrew: ${hebrewWord}
+English: ${englishWord}
+Transliteration: ${transliteration}
+
+Provide only the Italian translation, nothing else. Be concise.`;
+        
+        return await callGemini(prompt);
+    }
+    
+    async function generateExampleSentence(hebrewWord, translation, transliteration) {
+        const lang = useItalian ? 'Italian' : 'English';
+        const prompt = `Create a simple example sentence in Hebrew using the word "${hebrewWord}" (${transliteration}, meaning "${translation}").
+Then translate it to ${lang}.
+
+Format:
+Hebrew: [sentence]
+${lang}: [translation]
+
+Keep it simple and practical for Hebrew learners.`;
+        
+        return await callGemini(prompt);
+    }
+    
+    async function startAIConversation() {
+        const selectedWords = collectSelectedItems().slice(0, 10); // Use up to 10 words
+        if (selectedWords.length === 0) {
+            alert('Select some lectures first!');
+            return;
+        }
+        
+        const wordList = selectedWords.map(w => `${w.heb} (${w.trans}) - ${useItalian ? w.ita : w.eng}`).join(', ');
+        const lang = useItalian ? 'Italian' : 'English';
+        
+        const prompt = `You are a Hebrew language tutor. Start a conversation in Hebrew using these words: ${wordList}.
+
+Rules:
+1. Write in Hebrew with transliteration in parentheses
+2. Ask me questions or give me tasks using these words
+3. Keep sentences simple for beginners
+4. Provide ${lang} translations
+5. Be encouraging and patient
+
+Start the conversation now with a greeting and a simple question using one of these words.`;
+        
+        const response = await callGemini(prompt);
+        
+        if (response) {
+            conversationHistory = [
+                { role: 'ai', content: response }
+            ];
+            
+            displayConversation();
+        }
+    }
+    
+    function displayConversation() {
+        questionEl.innerHTML = '';
+        answerEl.innerHTML = '';
+        document.getElementById('multipleChoiceOptions').classList.remove('show');
+        
+        const chatContainer = document.createElement('div');
+        chatContainer.style.cssText = 'max-height: 400px; overflow-y: auto; text-align: left; padding: 1rem; background: #1a1a1a; border-radius: 0.8rem; margin-bottom: 1rem;';
+        
+        conversationHistory.forEach(msg => {
+            const msgDiv = document.createElement('div');
+            msgDiv.style.cssText = `padding: 0.8rem; margin-bottom: 0.8rem; border-radius: 0.8rem; ${msg.role === 'ai' ? 'background: #2a2a2a; border-left: 3px solid #2e7dff;' : 'background: #1a3a1a; border-left: 3px solid #22c55e;'}`;
+            msgDiv.innerHTML = `<div style="font-size: 0.75rem; color: #888; margin-bottom: 0.3rem;">${msg.role === 'ai' ? '🤖 AI Tutor' : '👤 You'}</div>${msg.content.replace(/\n/g, '<br>')}`;
+            chatContainer.appendChild(msgDiv);
+        });
+        
+        questionEl.appendChild(chatContainer);
+        
+        // Add input for user response
+        const inputContainer = document.createElement('div');
+        inputContainer.style.cssText = 'display: flex; gap: 0.5rem;';
+        inputContainer.innerHTML = `
+            <input type="text" id="conversationInput" placeholder="Type in Hebrew or ask for help..." style="flex: 1; padding: 0.8rem; border-radius: 0.5rem; border: 2px solid #444; background: #222; color: #fff;">
+            <button id="sendBtn" style="padding: 0.8rem 1.5rem; border-radius: 0.5rem; background: #2e7dff; color: #fff; border: none; cursor: pointer; font-weight: 600;">Send</button>
+        `;
+        answerEl.appendChild(inputContainer);
+        
+        const input = document.getElementById('conversationInput');
+        const sendBtn = document.getElementById('sendBtn');
+        
+        const sendMessage = async () => {
+            const userMessage = input.value.trim();
+            if (!userMessage) return;
+            
+            conversationHistory.push({ role: 'user', content: userMessage });
+            input.value = '';
+            sendBtn.disabled = true;
+            sendBtn.textContent = '...';
+            
+            // Get AI response
+            const context = conversationHistory.map(m => `${m.role}: ${m.content}`).join('\n\n');
+            const lang = useItalian ? 'Italian' : 'English';
+            
+            const prompt = `${context}
+
+Continue this Hebrew learning conversation. The user said: "${userMessage}"
+
+Respond in Hebrew with transliteration. If they made mistakes, gently correct them. If they asked a question, answer it. Always provide ${lang} translation. Keep it encouraging and educational.`;
+            
+            const response = await callGemini(prompt);
+            
+            if (response) {
+                conversationHistory.push({ role: 'ai', content: response });
+                displayConversation();
+            }
+            
+            sendBtn.disabled = false;
+            sendBtn.textContent = 'Send';
+        };
+        
+        sendBtn.onclick = sendMessage;
+        input.onkeydown = (e) => {
+            if (e.key === 'Enter') sendMessage();
+        };
+        
+        input.focus();
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+        
+        cardHintEl.textContent = '💬 Chat with AI tutor in Hebrew!';
+        modeLabelEl.textContent = 'AI Conversation Mode';
     }
 
     function extractItems(lines, entries) {
@@ -569,12 +724,15 @@
     
     const DOC_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSZ7JnAurRzW2CdTYdObIOhArDnssT1x7erlUrXZx4XzFLK-D-fV6S209nZVEz-7L1Fa43vtZyuSyQf/pub?output=csv";
     const PROGRESS_API_URL = "https://script.google.com/macros/s/AKfycbzixsucigGRd0uCEezZn_bUaAV9wbCffhr5L720YVksD8Ah8Co91xh26NKkqjCyhG4B/exec";
-    const SPREADSHEET_ID = "12zqQ6SwFNTy1Sy72-1PUcnAfI35V0Dw8LX6hBdAZxDo"; // Your actual spreadsheet ID
+    const SPREADSHEET_ID = "12zqQ6SwFNTy1Sy72-1PUcnAfI35V0Dw8LX6hBdAZxDo";
+    const GEMINI_API_KEY = "AIzaSyBHC4IG6tetKKgr1faGiL0WCsetBWcbac0";
+    const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent";
     
-    let currentView = 'thematic'; // 'thematic' or 'chronological'
+    let currentView = 'thematic';
     let isSyncing = false;
-    let studyMode = 'flashcard'; // 'flashcard', 'multiple-choice', 'typing', 'voice'
-    let useItalian = true; // Use Italian instead of English
+    let studyMode = 'flashcard'; // 'flashcard', 'multiple-choice', 'typing', 'voice', 'conversation'
+    let useItalian = true;
+    let conversationHistory = [];
 
     let lectures = {};
     let allItems = {};
@@ -962,6 +1120,12 @@ function buildLectureChips(lecturesMap) {
             return;
         }
 
+        // Handle conversation mode differently
+        if (studyMode === 'conversation') {
+            startAIConversation();
+            return;
+        }
+
         // Hide UI elements
         difficultyButtonsEl.classList.remove('show');
         document.getElementById('multipleChoiceOptions').classList.remove('show');
@@ -999,6 +1163,8 @@ function buildLectureChips(lecturesMap) {
             showMultipleChoice();
         } else if (studyMode === 'typing') {
             showTypingMode();
+        } else if (studyMode === 'voice') {
+            showVoiceMode();
         } else {
             // Standard flashcard mode
             showFlashcardQuestion();
@@ -1113,14 +1279,18 @@ function buildLectureChips(lecturesMap) {
     
     function showTypingMode() {
         cardHintEl.textContent = "Type your answer and press Enter";
+        
+        const targetLang = useItalian ? current.ita : current.eng;
+        const langName = useItalian ? "Italian" : "English";
+        
         answerEl.innerHTML = '<input type="text" id="typingInput" style="width: 100%; padding: 0.8rem; font-size: 1rem; border-radius: 0.5rem; border: 2px solid #444; background: #222; color: #fff; text-align: center;" placeholder="Type answer here...">';
         
         if (current.mode === "heb_to_eng") {
             questionEl.innerHTML = `<span class="hebrew-audio" onclick="speakHebrew('${current.heb.replace(/'/g, "\\'")}'); event.stopPropagation();">${current.heb}</span>   (${current.trans})`;
-            modeLabelEl.textContent = "Type the English translation:";
+            modeLabelEl.textContent = `Type the ${langName} translation:`;
             setTimeout(() => speakHebrew(current.heb), 300);
         } else {
-            questionEl.textContent = current.eng;
+            questionEl.textContent = targetLang;
             modeLabelEl.textContent = "Type the Hebrew word:";
         }
         
@@ -1132,6 +1302,67 @@ function buildLectureChips(lecturesMap) {
                 checkTypingAnswer(input.value.trim());
             }
         });
+    }
+    
+    function showVoiceMode() {
+        if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+            alert('Voice recognition not supported in your browser. Please use Chrome/Edge.');
+            studyMode = 'flashcard';
+            showFlashcardQuestion();
+            return;
+        }
+        
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const recognition = new SpeechRecognition();
+        recognition.lang = 'he-IL'; // Hebrew
+        recognition.continuous = false;
+        recognition.interimResults = false;
+        
+        cardHintEl.textContent = "🎤 Click to speak in Hebrew...";
+        
+        const targetLang = useItalian ? current.ita : current.eng;
+        questionEl.textContent = targetLang;
+        modeLabelEl.textContent = "Say it in Hebrew:";
+        
+        const micBtn = document.createElement('button');
+        micBtn.innerHTML = '🎤 Start Speaking';
+        micBtn.style.cssText = 'padding: 1rem 2rem; font-size: 1.2rem; border-radius: 0.8rem; border: none; background: #ef4444; color: #fff; cursor: pointer; margin-top: 1rem;';
+        answerEl.appendChild(micBtn);
+        
+        micBtn.onclick = () => {
+            micBtn.innerHTML = '🔴 Listening...';
+            micBtn.style.background = '#22c55e';
+            recognition.start();
+        };
+        
+        recognition.onresult = (event) => {
+            const transcript = event.results[0][0].transcript;
+            micBtn.innerHTML = '✓ Processing...';
+            
+            const match = fuzzyMatch(transcript, current.heb);
+            
+            setTimeout(() => {
+                if (match.isExact) {
+                    answerEl.innerHTML = `<div style="color: #22c55e; font-size: 1.2rem; margin: 1rem 0;">✓ Perfect pronunciation!</div><div>You said: "${transcript}"</div>`;
+                    recordDifficulty('easy');
+                } else if (match.isClose) {
+                    answerEl.innerHTML = `<div style="color: #eab308; font-size: 1.2rem; margin: 1rem 0;">⚠ Good attempt!</div><div>You said: "${transcript}"</div><div>Correct: ${current.heb}</div>`;
+                    recordDifficulty('medium');
+                } else {
+                    answerEl.innerHTML = `<div style="color: #ef4444; font-size: 1.2rem; margin: 1rem 0;">Try again</div><div>You said: "${transcript}"</div><div>Correct: ${current.heb}</div>`;
+                    recordDifficulty('hard');
+                }
+                
+                setTimeout(() => speakHebrew(current.heb), 500);
+                setTimeout(() => nextCard(), 3000);
+            }, 500);
+        };
+        
+        recognition.onerror = (event) => {
+            micBtn.innerHTML = '✗ Error - Try again';
+            micBtn.style.background = '#ef4444';
+            console.error('Speech recognition error:', event.error);
+        };
     }
     
     function checkTypingAnswer(userAnswer) {
@@ -1450,6 +1681,41 @@ function buildLectureChips(lecturesMap) {
     // Suggest Lecture button
     document.getElementById('suggestLectureBtn').addEventListener('click', () => {
         suggestNextLecture();
+    });
+    
+    // Example Sentence button
+    document.getElementById('exampleSentenceBtn').addEventListener('click', async () => {
+        if (!current) {
+            alert('Start studying first to see example sentences!');
+            return;
+        }
+        
+        const btn = document.getElementById('exampleSentenceBtn');
+        btn.disabled = true;
+        btn.textContent = '⏳ Generating...';
+        
+        const targetLang = useItalian ? current.ita : current.eng;
+        const example = await generateExampleSentence(current.heb, targetLang, current.trans);
+        
+        if (example) {
+            // Show in a nice modal-style overlay
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 2rem;';
+            modal.innerHTML = `
+                <div style="background: #181818; border-radius: 1rem; padding: 2rem; max-width: 600px; border: 1px solid #333;">
+                    <div style="font-size: 1.2rem; font-weight: 600; margin-bottom: 1rem; color: #2e7dff;">📝 Example Sentence</div>
+                    <div style="white-space: pre-wrap; line-height: 1.6; margin-bottom: 1.5rem;">${example}</div>
+                    <button onclick="this.parentElement.parentElement.remove()" style="padding: 0.6rem 1.5rem; border-radius: 999px; border: none; background: #2e7dff; color: #fff; cursor: pointer; font-weight: 600;">Close</button>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            modal.onclick = (e) => {
+                if (e.target === modal) modal.remove();
+            };
+        }
+        
+        btn.textContent = '🤖 Example Sentence';
+        btn.disabled = false;
     });
     
     // Mode selector
