@@ -308,6 +308,7 @@
         <button class="quick-btn" id="reviewSessionBtn">📝 Review Session</button>
         <button class="quick-btn" id="suggestLectureBtn">💡 Suggest Next</button>
         <button class="quick-btn" id="exampleSentenceBtn">🤖 Example Sentence</button>
+        <button class="quick-btn" id="batchTranslateBtn">🇮🇹 Batch Translate</button>
         <button class="quick-btn" id="syncBtn">☁️ Sync Now</button>
     </div>
 
@@ -538,25 +539,70 @@
         };
     }
     
-    // Gemini AI functions
-    async function callGemini(prompt) {
+    // Gemini AI functions with caching
+    async function callGemini(prompt, cacheKey = null, cacheType = null) {
+        // Check cache first (local + remote)
+        if (cacheKey && cacheType) {
+            // Check local session cache
+            const localKey = `${cacheType}:${cacheKey}`;
+            if (aiCache[localKey]) {
+                dbg('Using local cache for:', localKey);
+                return aiCache[localKey];
+            }
+            
+            // Check remote cache in Google Sheet
+            try {
+                const response = await fetch(`${PROGRESS_API_URL}?action=load_cache&type=${encodeURIComponent(cacheType)}&key=${encodeURIComponent(cacheKey)}`);
+                const data = await response.json();
+                
+                if (data.found) {
+                    dbg('Using remote cache for:', localKey);
+                    aiCache[localKey] = data.value;
+                    return data.value;
+                }
+            } catch (e) {
+                console.error('Cache load error:', e);
+            }
+        }
+        
+        // No cache, call AI via secure proxy
         try {
-            const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
+            const response = await fetch(`${PROGRESS_API_URL}?action=ai_call`, {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json',
+                    'Content-Type': 'text/plain',
                 },
-                body: JSON.stringify({
-                    contents: [{
-                        parts: [{
-                            text: prompt
-                        }]
-                    }]
-                })
+                body: prompt
             });
             
             const data = await response.json();
-            return data.candidates[0].content.parts[0].text;
+            const result = data.result || data.error;
+            
+            // Save to cache if key provided
+            if (cacheKey && cacheType && result && !data.error) {
+                const localKey = `${cacheType}:${cacheKey}`;
+                aiCache[localKey] = result;
+                
+                // Save to remote cache
+                try {
+                    await fetch(`${PROGRESS_API_URL}?action=save_cache`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            type: cacheType,
+                            key: cacheKey,
+                            value: result
+                        })
+                    });
+                    dbg('Saved to remote cache:', localKey);
+                } catch (e) {
+                    console.error('Cache save error:', e);
+                }
+            }
+            
+            return result;
         } catch (error) {
             console.error('Gemini API error:', error);
             return null;
@@ -564,6 +610,7 @@
     }
     
     async function translateToItalian(hebrewWord, englishWord, transliteration) {
+        const cacheKey = `${hebrewWord}::${englishWord}`;
         const prompt = `Translate this Hebrew word to Italian:
 Hebrew: ${hebrewWord}
 English: ${englishWord}
@@ -571,10 +618,11 @@ Transliteration: ${transliteration}
 
 Provide only the Italian translation, nothing else. Be concise.`;
         
-        return await callGemini(prompt);
+        return await callGemini(prompt, cacheKey, 'translation');
     }
     
     async function generateExampleSentence(hebrewWord, translation, transliteration) {
+        const cacheKey = `${hebrewWord}::${translation}`;
         const lang = useItalian ? 'Italian' : 'English';
         const prompt = `Create a simple example sentence in Hebrew using the word "${hebrewWord}" (${transliteration}, meaning "${translation}").
 Then translate it to ${lang}.
@@ -585,15 +633,49 @@ ${lang}: [translation]
 
 Keep it simple and practical for Hebrew learners.`;
         
-        return await callGemini(prompt);
+        return await callGemini(prompt, cacheKey, 'example');
+    }
+    
+    async function batchTranslateToItalian(words) {
+        // Translate up to 50 words at once
+        const batch = words.slice(0, 50);
+        const wordList = batch.map(w => `${w.heb} (${w.trans}) = ${w.eng}`).join('\n');
+        
+        const prompt = `Translate these Hebrew words from English to Italian. Return ONLY a JSON array of translations in the same order.
+
+Words:
+${wordList}
+
+Return format: ["translation1", "translation2", ...]
+
+Be concise, one word or short phrase per translation.`;
+        
+        const result = await callGemini(prompt, null, null); // No cache for batch
+        
+        try {
+            // Parse JSON response
+            const jsonMatch = result.match(/\[.*\]/s);
+            if (jsonMatch) {
+                const translations = JSON.parse(jsonMatch[0]);
+                return translations;
+            }
+        } catch (e) {
+            console.error('Batch translation parse error:', e);
+        }
+        
+        return null;
     }
     
     async function startAIConversation() {
-        const selectedWords = collectSelectedItems().slice(0, 10); // Use up to 10 words
+        const selectedWords = collectSelectedItems().slice(0, 10);
         if (selectedWords.length === 0) {
             alert('Select some lectures first!');
             return;
         }
+        
+        // Check if we have a cached conversation start
+        const wordHashes = selectedWords.map(w => w.heb).join(',');
+        const cacheKey = `conv_start::${wordHashes}`;
         
         const wordList = selectedWords.map(w => `${w.heb} (${w.trans}) - ${useItalian ? w.ita : w.eng}`).join(', ');
         const lang = useItalian ? 'Italian' : 'English';
@@ -609,7 +691,7 @@ Rules:
 
 Start the conversation now with a greeting and a simple question using one of these words.`;
         
-        const response = await callGemini(prompt);
+        const response = await callGemini(prompt, cacheKey, 'conversation');
         
         if (response) {
             conversationHistory = [
@@ -725,14 +807,13 @@ Respond in Hebrew with transliteration. If they made mistakes, gently correct th
     const DOC_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSZ7JnAurRzW2CdTYdObIOhArDnssT1x7erlUrXZx4XzFLK-D-fV6S209nZVEz-7L1Fa43vtZyuSyQf/pub?output=csv";
     const PROGRESS_API_URL = "https://script.google.com/macros/s/AKfycbzixsucigGRd0uCEezZn_bUaAV9wbCffhr5L720YVksD8Ah8Co91xh26NKkqjCyhG4B/exec";
     const SPREADSHEET_ID = "12zqQ6SwFNTy1Sy72-1PUcnAfI35V0Dw8LX6hBdAZxDo";
-    const GEMINI_API_KEY = "AIzaSyBHC4IG6tetKKgr1faGiL0WCsetBWcbac0";
-    const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent";
     
     let currentView = 'thematic';
     let isSyncing = false;
     let studyMode = 'flashcard'; // 'flashcard', 'multiple-choice', 'typing', 'voice', 'conversation'
     let useItalian = true;
     let conversationHistory = [];
+    let aiCache = {}; // Local cache for this session
 
     let lectures = {};
     let allItems = {};
@@ -1698,12 +1779,11 @@ function buildLectureChips(lecturesMap) {
         const example = await generateExampleSentence(current.heb, targetLang, current.trans);
         
         if (example) {
-            // Show in a nice modal-style overlay
             const modal = document.createElement('div');
             modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 2rem;';
             modal.innerHTML = `
                 <div style="background: #181818; border-radius: 1rem; padding: 2rem; max-width: 600px; border: 1px solid #333;">
-                    <div style="font-size: 1.2rem; font-weight: 600; margin-bottom: 1rem; color: #2e7dff;">📝 Example Sentence</div>
+                    <div style="font-size: 1.2rem; font-weight: 600; margin-bottom: 1rem; color: #2e7dff;">📝 Example Sentence (Cached)</div>
                     <div style="white-space: pre-wrap; line-height: 1.6; margin-bottom: 1.5rem;">${example}</div>
                     <button onclick="this.parentElement.parentElement.remove()" style="padding: 0.6rem 1.5rem; border-radius: 999px; border: none; background: #2e7dff; color: #fff; cursor: pointer; font-weight: 600;">Close</button>
                 </div>
@@ -1715,6 +1795,55 @@ function buildLectureChips(lecturesMap) {
         }
         
         btn.textContent = '🤖 Example Sentence';
+        btn.disabled = false;
+    });
+    
+    // Batch Translate button
+    document.getElementById('batchTranslateBtn').addEventListener('click', async () => {
+        const items = collectSelectedItems();
+        
+        if (items.length === 0) {
+            alert('Select some lectures first!');
+            return;
+        }
+        
+        // Find words without Italian translation
+        const toTranslate = items.filter(item => !item.ita || item.ita === item.eng);
+        
+        if (toTranslate.length === 0) {
+            alert('All selected words already have Italian translations! ✓');
+            return;
+        }
+        
+        if (!confirm(`Translate ${toTranslate.length} words to Italian?\n\nThis will use ~${Math.ceil(toTranslate.length / 50)} AI calls (batches of 50).`)) {
+            return;
+        }
+        
+        const btn = document.getElementById('batchTranslateBtn');
+        btn.disabled = true;
+        btn.textContent = '⏳ Translating...';
+        
+        let translated = 0;
+        
+        // Process in batches of 50
+        for (let i = 0; i < toTranslate.length; i += 50) {
+            const batch = toTranslate.slice(i, i + 50);
+            btn.textContent = `⏳ ${translated}/${toTranslate.length}`;
+            
+            const translations = await batchTranslateToItalian(batch);
+            
+            if (translations && translations.length === batch.length) {
+                // Update items with translations
+                batch.forEach((item, idx) => {
+                    item.ita = translations[idx];
+                });
+                translated += batch.length;
+            }
+        }
+        
+        alert(`✓ Translated ${translated} words to Italian!\n\nNote: Translations are cached and saved to Google Sheet.`);
+        
+        btn.textContent = '🇮🇹 Batch Translate';
         btn.disabled = false;
     });
     
