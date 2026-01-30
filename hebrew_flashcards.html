@@ -547,74 +547,88 @@
     }
     
     // Gemini AI functions with caching
-    async function callGemini(prompt, cacheKey = null, cacheType = null) {
-        // Check cache first (local + remote)
-        if (cacheKey && cacheType) {
-            // Check local session cache
-            const localKey = `${cacheType}:${cacheKey}`;
-            if (aiCache[localKey]) {
-                dbg('Using local cache for:', localKey);
-                return aiCache[localKey];
-            }
-            
-            // Check remote cache in Google Sheet
-            try {
-                const response = await fetch(`${PROGRESS_API_URL}?action=load_cache&type=${encodeURIComponent(cacheType)}&key=${encodeURIComponent(cacheKey)}`);
-                const data = await response.json();
-                
-                if (data.found) {
-                    dbg('Using remote cache for:', localKey);
-                    aiCache[localKey] = data.value;
-                    return data.value;
-                }
-            } catch (e) {
-                console.error('Cache load error:', e);
-            }
+// Gemini AI functions with caching
+async function callGemini(prompt, cacheKey = null, cacheType = null) {
+    // Check cache first (local + remote)
+    if (cacheKey && cacheType) {
+        // Check local session cache
+        const localKey = `${cacheType}:${cacheKey}`;
+        if (aiCache[localKey]) {
+            dbg('Using local cache for:', localKey);
+            return aiCache[localKey];
         }
         
-        // No cache, call AI via secure proxy
+        // Check remote cache in Google Sheet
         try {
-            const response = await fetch(`${PROGRESS_API_URL}?action=ai_call`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'text/plain',
-                },
-                body: prompt
-            });
-            
+            const response = await fetch(`${PROGRESS_API_URL}?action=load_cache&type=${encodeURIComponent(cacheType)}&key=${encodeURIComponent(cacheKey)}`);
             const data = await response.json();
-            const result = data.result || data.error;
             
-            // Save to cache if key provided
-            if (cacheKey && cacheType && result && !data.error) {
-                const localKey = `${cacheType}:${cacheKey}`;
-                aiCache[localKey] = result;
-                
-                // Save to remote cache
-                try {
-                    await fetch(`${PROGRESS_API_URL}?action=save_cache`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            type: cacheType,
-                            key: cacheKey,
-                            value: result
-                        })
-                    });
-                    dbg('Saved to remote cache:', localKey);
-                } catch (e) {
-                    console.error('Cache save error:', e);
-                }
+            if (data.found) {
+                dbg('Using remote cache for:', localKey);
+                aiCache[localKey] = data.value;
+                return data.value;
             }
-            
-            return result;
-        } catch (error) {
-            console.error('Gemini API error:', error);
-            return null;
+        } catch (e) {
+            console.error('Cache load error:', e);
         }
     }
+    
+    // No cache, call AI via secure proxy
+    try {
+        console.log('Calling Gemini API with prompt length:', prompt.length);
+        
+        const response = await fetch(`${PROGRESS_API_URL}?action=ai_call`, {
+            method: 'POST',
+            body: prompt  // Send as plain text, not JSON
+        });
+        
+        if (!response.ok) {
+            console.error('API response not ok:', response.status);
+            return null;
+        }
+        
+        const data = await response.json();
+        console.log('Gemini API response:', data);
+        
+        // Check for errors first
+        if (data.error) {
+            console.error('Gemini API error:', data.error);
+            return null;
+        }
+        
+        const result = data.result;
+        
+        if (!result) {
+            console.error('No result in API response');
+            return null;
+        }
+        
+        // Save to cache if key provided
+        if (cacheKey && cacheType && result) {
+            const localKey = `${cacheType}:${cacheKey}`;
+            aiCache[localKey] = result;
+            
+            // Save to remote cache (don't await, fire and forget)
+            fetch(`${PROGRESS_API_URL}?action=save_cache`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    type: cacheType,
+                    key: cacheKey,
+                    value: result
+                })
+            }).then(() => {
+                dbg('Saved to remote cache:', localKey);
+            }).catch(e => {
+                console.error('Cache save error:', e);
+            });
+        }
+        
+        return result;
+    } catch (error) {
+        console.error('Gemini API error:', error);
+        return null;
+    }
+}
     
     async function translateToItalian(hebrewWord, englishWord, transliteration) {
         const cacheKey = `${hebrewWord}::${englishWord}`;
@@ -2021,5 +2035,6 @@ document.querySelectorAll('.doc-btn').forEach(btn => {
 </script>
 </body>
 </html>
+
 
 
